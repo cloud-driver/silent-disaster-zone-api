@@ -6,6 +6,9 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 
+from src.advisor.command_advisor import generate_command_advice
+from src.advisor.ollama_client import OllamaError, check_ollama, get_ollama_settings
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_JSON = PROJECT_ROOT / "outputs" / "latest" / "silent_risk.json"
@@ -279,3 +282,68 @@ def run_pipeline():
         ],
         "stdout_tail": result.stdout[-4000:],
     }
+
+@app.get("/advisor/health")
+def advisor_health():
+    status = check_ollama()
+
+    return {
+        "status": "ok" if status["available"] else "unavailable",
+        "ollama": status,
+        "note": (
+            "Ollama advisor is optional. "
+            "The silent-risk API can still run even if Ollama is unavailable."
+        ),
+    }
+
+@app.get("/advisor/command")
+def get_command_advice(
+    limit: int = Query(default=5, ge=1, le=10),
+    refresh: bool = Query(default=False, description="是否先抓取即時資料並重算沉默風險"),
+):
+    refresh_logs = None
+
+    if refresh:
+        refresh_logs = refresh_realtime_pipeline()
+
+    data = load_silent_risk()
+
+    try:
+        advice_result = generate_command_advice(
+            records=data,
+            limit=limit,
+        )
+
+        return {
+            "status": "success",
+            "refreshed": refresh,
+            "refresh_logs": refresh_logs,
+            "advisor_type": "ollama_local_llm",
+            "model": advice_result["model"],
+            "base_url": advice_result["base_url"],
+            "selected_villages": advice_result["selected_villages"],
+            "advice": advice_result["advice"],
+            "disclaimer": (
+                "This is an AI-generated command briefing for decision support only. "
+                "It is not an official disaster declaration or evacuation order."
+            ),
+        }
+
+    except OllamaError as e:
+        settings = get_ollama_settings()
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Ollama advisor is unavailable.",
+                "error": str(e),
+                "expected_base_url": settings["base_url"],
+                "configured_model": settings["model"],
+                "how_to_fix": [
+                    "Install Ollama.",
+                    "Run: ollama serve",
+                    f"Run: ollama pull {settings['model']}",
+                    "Then call /advisor/health again.",
+                ],
+            },
+        )
