@@ -227,7 +227,9 @@ This MVP was developed and tested with:
 - Main geospatial libraries: GeoPandas, Shapely, PyProj
 - Machine learning: scikit-learn MLPRegressor
 
-Recommended setup:
+Recommended setup differs by operating system.
+
+### macOS / Linux
 
 ```bash
 python3 --version
@@ -235,12 +237,32 @@ python3 --version
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
+```
+
+### Windows PowerShell
+
+```powershell
+py -3.12 --version
+# Python 3.12.10
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+If PowerShell blocks virtual environment activation, run this in the same PowerShell window and try again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 ```
 
 ---
 
 ## 11. Installation
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
@@ -248,13 +270,32 @@ cd silent-disaster-zone-api
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
+```
+
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
+cd silent-disaster-zone-api
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
 Create `.env` from `.env.example`:
 
+macOS / Linux:
+
 ```bash
 cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
 ```
 
 Then fill in your own API key:
@@ -275,10 +316,21 @@ For quick review, the API automatically falls back to files in `sample_outputs/`
 
 After cloning the repository, reviewers can run:
 
+macOS / Linux:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
+uvicorn src.api.main:app --reload
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 uvicorn src.api.main:app --reload
 ```
 
@@ -334,6 +386,9 @@ GET /silent-risk.geojson
 ---
 
 ## 14. API Endpoints
+
+> Windows note: In PowerShell, use `curl.exe` instead of `curl` if `curl` is aliased to `Invoke-WebRequest`. You can also open the URLs directly in a browser.
+
 
 ### `GET /health`
 
@@ -429,11 +484,22 @@ for row in data["data"]:
 
 Full realtime scoring requires local static/processed data artifacts.
 
+macOS / Linux:
+
 ```bash
 python3 scripts/fetch_realtime_sources.py
 python3 scripts/normalize_realtime_sources.py
 python3 scripts/compute_silent_risk_realtime.py
 python3 scripts/apply_silent_risk_nn.py
+```
+
+Windows PowerShell:
+
+```powershell
+python scripts/fetch_realtime_sources.py
+python scripts/normalize_realtime_sources.py
+python scripts/compute_silent_risk_realtime.py
+python scripts/apply_silent_risk_nn.py
 ```
 
 Outputs will be written to:
@@ -456,17 +522,36 @@ outputs/history/{run_id}/
 
 Before running the API with NN scoring, train the model once:
 
+macOS / Linux:
+
 ```bash
 python3 scripts/train_silent_risk_nn.py
 ```
 
+Windows PowerShell:
+
+```powershell
+python scripts/train_silent_risk_nn.py
+```
+
 Then run realtime scoring:
+
+macOS / Linux:
 
 ```bash
 python3 scripts/fetch_realtime_sources.py
 python3 scripts/normalize_realtime_sources.py
 python3 scripts/compute_silent_risk_realtime.py
 python3 scripts/apply_silent_risk_nn.py
+```
+
+Windows PowerShell:
+
+```powershell
+python scripts/fetch_realtime_sources.py
+python scripts/normalize_realtime_sources.py
+python scripts/compute_silent_risk_realtime.py
+python scripts/apply_silent_risk_nn.py
 ```
 
 The API `refresh=true` mode will run the realtime refresh pipeline and apply the NN scoring layer if the trained model exists.
@@ -551,8 +636,16 @@ For quick review, the API falls back to `sample_outputs/` when `outputs/latest/`
 
 The neural network model metadata is committed, but the `.joblib` model artifact is ignored. To regenerate the model, run:
 
+macOS / Linux:
+
 ```bash
 python3 scripts/train_silent_risk_nn.py
+```
+
+Windows PowerShell:
+
+```powershell
+python scripts/train_silent_risk_nn.py
 ```
 
 ---
