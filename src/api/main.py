@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Query
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_JSON = PROJECT_ROOT / "outputs" / "latest" / "silent_risk.json"
 OUTPUT_GEOJSON = PROJECT_ROOT / "outputs" / "latest" / "silent_risk.geojson"
+SAMPLE_JSON = PROJECT_ROOT / "sample_outputs" / "silent_risk_sample.json"
+SAMPLE_GEOJSON = PROJECT_ROOT / "sample_outputs" / "silent_risk_sample.geojson"
 PIPELINE_SCRIPT = PROJECT_ROOT / "scripts" / "run_pipeline.py"
 
 
@@ -20,14 +22,42 @@ app = FastAPI(
 )
 
 
-def load_silent_risk():
-    if not OUTPUT_JSON.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="outputs/silent_risk.json not found. Please run the pipeline first.",
-        )
+def get_available_json_path():
+    if OUTPUT_JSON.exists():
+        return OUTPUT_JSON
 
-    with open(OUTPUT_JSON, "r", encoding="utf-8") as f:
+    if SAMPLE_JSON.exists():
+        return SAMPLE_JSON
+
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "No silent risk JSON found. "
+            "Expected outputs/latest/silent_risk.json or sample_outputs/silent_risk_sample.json."
+        ),
+    )
+
+
+def get_available_geojson_path():
+    if OUTPUT_GEOJSON.exists():
+        return OUTPUT_GEOJSON
+
+    if SAMPLE_GEOJSON.exists():
+        return SAMPLE_GEOJSON
+
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "No silent risk GeoJSON found. "
+            "Expected outputs/latest/silent_risk.geojson or sample_outputs/silent_risk_sample.geojson."
+        ),
+    )
+
+
+def load_silent_risk():
+    json_path = get_available_json_path()
+
+    with open(json_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def run_script(script_name: str):
@@ -99,10 +129,27 @@ def health():
     model_path = PROJECT_ROOT / "models" / "silent_risk_mlp.joblib"
     metadata_path = PROJECT_ROOT / "models" / "silent_risk_mlp_metadata.json"
 
+    active_json_path = None
+    active_geojson_path = None
+
+    if OUTPUT_JSON.exists():
+        active_json_path = str(OUTPUT_JSON.relative_to(PROJECT_ROOT))
+    elif SAMPLE_JSON.exists():
+        active_json_path = str(SAMPLE_JSON.relative_to(PROJECT_ROOT))
+
+    if OUTPUT_GEOJSON.exists():
+        active_geojson_path = str(OUTPUT_GEOJSON.relative_to(PROJECT_ROOT))
+    elif SAMPLE_GEOJSON.exists():
+        active_geojson_path = str(SAMPLE_GEOJSON.relative_to(PROJECT_ROOT))
+
     return {
         "status": "ok",
         "silent_risk_json_exists": OUTPUT_JSON.exists(),
         "silent_risk_geojson_exists": OUTPUT_GEOJSON.exists(),
+        "sample_json_exists": SAMPLE_JSON.exists(),
+        "sample_geojson_exists": SAMPLE_GEOJSON.exists(),
+        "active_json_path": active_json_path,
+        "active_geojson_path": active_geojson_path,
         "nn_model_exists": model_path.exists(),
         "nn_model_metadata_exists": metadata_path.exists(),
     }
@@ -191,13 +238,9 @@ def get_silent_risk_by_village(village_id: str):
 
 @app.get("/silent-risk.geojson")
 def get_silent_risk_geojson():
-    if not OUTPUT_GEOJSON.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="outputs/silent_risk.geojson not found. Please run the pipeline first.",
-        )
+    geojson_path = get_available_geojson_path()
 
-    with open(OUTPUT_GEOJSON, "r", encoding="utf-8") as f:
+    with open(geojson_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 

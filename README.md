@@ -286,3 +286,41 @@ python3 scripts/apply_silent_risk_nn.py
 ```
 
 The API `refresh=true` mode will run the realtime refresh pipeline and apply the NN scoring layer if the trained model exists.
+
+---
+
+## Quick Demo Without Raw Data
+
+This repository does not commit raw government datasets or generated runtime outputs.
+
+For quick review, the API automatically falls back to files in `sample_outputs/` when `outputs/latest/` does not exist.
+
+So after cloning the repository, reviewers can run:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.api.main:app --reload
+````
+
+Then open:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Useful demo endpoints:
+
+```text
+GET /health
+GET /silent-risk/top?limit=5
+GET /silent-risk/10015020001
+GET /silent-risk.geojson
+```
+
+To run with fresh realtime data, create `.env` from `.env.example`, add your CWA API key, then use:
+
+```text
+GET /silent-risk/top?limit=5&refresh=true
+```
