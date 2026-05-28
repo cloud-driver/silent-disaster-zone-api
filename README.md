@@ -324,3 +324,9 @@ To run with fresh realtime data, create `.env` from `.env.example`, add your CWA
 ```text
 GET /silent-risk/top?limit=5&refresh=true
 ```
+
+---
+
+## Reviewer Note
+
+The repository includes sample outputs so the API can be reviewed without downloading large raw datasets. If `outputs/latest/` is not available, the API automatically falls back to `sample_outputs/`.
