@@ -707,3 +707,188 @@ Planned improvements:
 - 使用歷史災情與巡查結果重新訓練 AI scoring layer。
 - 加入 Docker 部署設定。
 - 加入前端地圖 demo。
+
+---
+
+## 26. Optional Extension: Ollama Command Advisor
+
+This project can be extended with a local Ollama-based command advisor layer.
+
+The advisor layer is **not** responsible for deciding whether a place is actually in disaster or issuing official evacuation orders. Its role is to convert the API output into a concise, human-readable command briefing for discussion, triage, and follow-up checks.
+
+Recommended positioning:
+
+```text
+silent_risk_score = model output
+Ollama advisor = command suggestion / briefing generator
+human commander = final decision maker
+```
+
+### Why use Ollama here?
+
+Ollama can run a local LLM on a developer machine or internal server. This is useful for disaster-response discussion because the generated advice can be based on local API outputs without sending village-level risk records to an external cloud model.
+
+### Suggested input to the advisor
+
+The advisor should receive structured JSON from the API, for example the response from:
+
+```text
+GET /silent-risk/top?limit=5
+```
+
+Each record may include:
+
+```json
+{
+  "village_id": "10015020001",
+  "county_name": "花蓮縣",
+  "town_name": "鳳林鎮",
+  "village_name": "鳳仁里",
+  "silent_risk_score": 0.392821,
+  "silent_risk_level": "medium",
+  "silent_reason": "靜態災害風險偏高；感測器覆蓋缺口偏高；近6小時無通報；近24小時無通報",
+  "static_risk_score": 0.611599,
+  "sensor_gap_score": 0.611599,
+  "realtime_event_score": 0.0,
+  "report_count_6h": 0,
+  "report_count_24h": 0
+}
+```
+
+### Suggested prompt design
+
+The prompt should force the model to stay inside the data and avoid overclaiming.
+
+```text
+You are a disaster-response command assistant.
+
+Use only the provided JSON records.
+Do not claim that a disaster has definitely occurred.
+Do not issue official evacuation orders.
+Do not invent facts, sensor values, road conditions, or casualty information.
+
+Your task:
+1. Summarize the top priority villages.
+2. Explain why each village needs attention.
+3. Suggest field verification actions.
+4. Suggest communication actions.
+5. Point out data limitations.
+6. Return concise Traditional Chinese output.
+
+Input JSON:
+{silent_risk_records}
+```
+
+### Example output style
+
+```text
+指揮建議摘要：
+
+1. 優先確認：花蓮縣鳳林鎮鳳仁里
+   - 原因：靜態災害風險偏高，且感測器覆蓋不足，近 6/24 小時無通報。
+   - 建議：優先透過村里長、消防分隊或巡查人員確認現地狀況。
+
+2. 次優先確認：花蓮縣玉里鎮啟模里
+   - 原因：風險分數偏高，但目前缺乏通報資料。
+   - 建議：確認道路、通訊與弱勢住戶狀況。
+
+資料限制：
+目前通報資料可能不完整，模型輸出代表優先關注順序，不等同於實際災情判定。
+```
+
+### Local Ollama setup
+
+macOS / Linux:
+
+```bash
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+Windows PowerShell:
+
+```powershell
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+Recommended environment variables:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+### Minimal Python example
+
+```python
+import json
+import os
+import requests
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+
+records = [
+    {
+        "county_name": "花蓮縣",
+        "town_name": "鳳林鎮",
+        "village_name": "鳳仁里",
+        "silent_risk_score": 0.392821,
+        "silent_risk_level": "medium",
+        "silent_reason": "靜態災害風險偏高；感測器覆蓋缺口偏高；近6小時無通報；近24小時無通報"
+    }
+]
+
+prompt = f"""
+你是防災應變指揮輔助助手。
+
+請只根據以下 JSON 資料產生建議。
+不要宣稱災害已經確定發生。
+不要發布正式撤離命令。
+不要編造資料中沒有的道路、傷亡、感測器或通報資訊。
+
+請輸出：
+1. 優先確認區域
+2. 原因
+3. 建議現地查證動作
+4. 建議通訊聯繫動作
+5. 資料限制
+
+JSON:
+{json.dumps(records, ensure_ascii=False, indent=2)}
+"""
+
+response = requests.post(
+    f"{OLLAMA_BASE_URL}/api/generate",
+    json={
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False
+    },
+    timeout=120,
+)
+
+response.raise_for_status()
+print(response.json()["response"])
+```
+
+### Suggested future API endpoint
+
+A future version can expose this advisor through FastAPI:
+
+```text
+GET /advisor/command?limit=5
+```
+
+Expected behavior:
+
+```text
+1. Read /silent-risk/top records.
+2. Build a constrained prompt.
+3. Call local Ollama.
+4. Return command suggestions with data limitations.
+```
+
+This advisor should remain an **assistive briefing layer**, not an automated decision-maker.
+
