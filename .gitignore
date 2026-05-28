@@ -26,6 +26,8 @@ data/realtime/processed/
 data/realtime/latest/
 data/runs/
 
+release_assets/*.zip
+
 # Generated outputs
 outputs/
 

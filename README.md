@@ -516,6 +516,35 @@ Historical outputs are written to:
 outputs/history/{run_id}/
 ```
 
+### Full Pipeline Reproduction with Raw Data
+
+This repository does not commit raw government datasets directly. To reproduce the full pipeline, download `raw_data_minimal.zip` from the GitHub Release page and unzip it into the project root.
+
+Expected structure:
+
+```text
+data/raw/village_boundary/
+data/raw/population/
+data/raw/flood_potential/
+data/raw/debris_flow/
+data/raw/sensors/
+data/raw/reports/
+```
+
+Then run:
+
+```bash
+python3 scripts/run_pipeline.py
+```
+
+On Windows PowerShell:
+
+```powershell
+py -3.12 scripts/run_pipeline.py
+```
+
+The full pipeline will regenerate processed features and output files from the raw datasets.
+
 ---
 
 ## 17. Reproducing the Neural Network Scoring Layer
