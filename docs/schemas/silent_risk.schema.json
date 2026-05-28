@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SilentRiskRecord",
+  "type": "object",
+  "required": [
+    "village_id",
+    "county_name",
+    "town_name",
+    "village_name",
+    "silent_risk_score",
+    "silent_risk_level",
+    "silent_reason"
+  ],
+  "properties": {
+    "village_id": {
+      "type": "string",
+      "description": "Village administrative code."
+    },
+    "county_name": {
+      "type": "string",
+      "description": "County or city name."
+    },
+    "town_name": {
+      "type": "string",
+      "description": "Township or district name."
+    },
+    "village_name": {
+      "type": "string",
+      "description": "Village name."
+    },
+    "population_total": {
+      "type": ["number", "integer", "null"],
+      "description": "Total population."
+    },
+    "elderly_ratio": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Ratio of population aged 65 or older."
+    },
+    "static_risk_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "sensor_gap_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "sensor_realtime_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rainfall_realtime_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "landslide_realtime_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "road_realtime_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "realtime_event_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "report_count_6h": {
+      "type": ["number", "integer", "null"],
+      "minimum": 0
+    },
+    "report_count_24h": {
+      "type": ["number", "integer", "null"],
+      "minimum": 0
+    },
+    "silent_risk_rule_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "silent_risk_nn_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "silent_risk_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "silent_risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "silent_reason": {
+      "type": "string"
+    },
+    "realtime_run_id": {
+      "type": ["string", "null"]
+    }
+  },
+  "additionalProperties": true
+}

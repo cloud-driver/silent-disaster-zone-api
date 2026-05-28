@@ -1,0 +1,42 @@
+[
+  {
+    "report_id": "R001",
+    "source": "Mock",
+    "report_type": "flood",
+    "severity": 3,
+    "created_at": "2026-05-17T14:30:00+08:00",
+    "lon": 121.604,
+    "lat": 23.976,
+    "description": "花蓮市道路積水"
+  },
+  {
+    "report_id": "R002",
+    "source": "Mock",
+    "report_type": "road_block",
+    "severity": 4,
+    "created_at": "2026-05-17T15:10:00+08:00",
+    "lon": 121.591,
+    "lat": 23.956,
+    "description": "吉安鄉道路疑似中斷"
+  },
+  {
+    "report_id": "R003",
+    "source": "Mock",
+    "report_type": "flood",
+    "severity": 2,
+    "created_at": "2026-05-17T13:50:00+08:00",
+    "lon": 121.4486,
+    "lat": 23.7528,
+    "description": "鳳林鎮感測器附近低窪處積水回報"
+  },
+  {
+    "report_id": "R004",
+    "source": "Mock",
+    "report_type": "debris",
+    "severity": 3,
+    "created_at": "2026-05-16T20:20:00+08:00",
+    "lon": 121.313,
+    "lat": 23.431,
+    "description": "卓溪鄉山區道路旁落石"
+  }
+]
