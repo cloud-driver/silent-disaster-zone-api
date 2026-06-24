@@ -207,6 +207,22 @@ silent_risk_score
 因此，不論資料由完整批次流程或即時 refresh 流程產生，
 `silent_risk_score` 的計算邏輯皆保持一致。
 
+### Automated Tests
+
+核心計分邏輯包含自動化測試，可於專案根目錄執行：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+測試涵蓋：
+
+* 有一筆通報時，沉默風險應下降但不得歸零。
+* 感測器覆蓋缺口應獨立影響排序。
+* 24 小時通報數不得小於近 6 小時通報數。
+* 缺少必要計分欄位時，系統必須明確報錯。
+* 正式計分模式必須標示為 `rule_based_mvp`。
+
 ---
 
 ## 9. AI Scoring Layer
