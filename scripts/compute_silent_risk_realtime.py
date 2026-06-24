@@ -3,9 +3,14 @@ import json
 import shutil
 import pandas as pd
 import geopandas as gpd
+import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.scoring.silent_risk import apply_silent_risk_scoring
 
 BASE_INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "villages_hualien_with_reports.geojson"
 REALTIME_FEATURES_PATH = PROJECT_ROOT / "data" / "realtime" / "latest" / "realtime_features.csv"
@@ -210,45 +215,22 @@ numeric_cols = [
 for col in numeric_cols:
     gdf[col] = gdf[col].fillna(0).astype(float)
 
+print("\n=== 5. 使用共用公式計算即時沉默風險 ===")
 
-# 舊版 base_risk_score：
-# 0.55 static + 0.25 sensor_gap + 0.20 sensor_realtime
-#
-# 新版加入 realtime_event_score：
-# static：仍是主體
-# sensor_gap：反映觀測空白
-# sensor_realtime：民生物聯網淹水感測器
-# realtime_event：CWA / ARDSWC / 警廣即時資料
-gdf["base_risk_score"] = (
-    0.45 * gdf["static_risk_score"]
-    + 0.20 * gdf["sensor_gap_score"]
-    + 0.15 * gdf["sensor_realtime_score"]
-    + 0.20 * gdf["realtime_event_score"]
-).clip(0, 1)
+gdf = apply_silent_risk_scoring(gdf)
 
-print("base_risk_score 統計：")
-print(gdf["base_risk_score"].describe())
+gdf["silent_reason"] = gdf.apply(
+    build_silent_reason,
+    axis=1,
+)
 
-
-print("\n=== 5. 計算沉默風險 ===")
-
-gdf["has_report_6h"] = (gdf["report_count_6h"] > 0).astype(int)
-gdf["has_report_24h"] = (gdf["report_count_24h"] > 0).astype(int)
-
-gdf["report_activity_score"] = (
-    0.7 * gdf["has_report_6h"]
-    + 0.3 * gdf["has_report_24h"]
-).clip(0, 1)
-
-gdf["silence_factor"] = (1 - gdf["report_activity_score"]).clip(0, 1)
-
-gdf["silent_risk_score"] = (
-    gdf["base_risk_score"] * gdf["silence_factor"]
-).clip(0, 1)
-
-gdf["silent_risk_level"] = gdf["silent_risk_score"].apply(assign_level)
-gdf["silent_reason"] = gdf.apply(build_silent_reason, axis=1)
 gdf["realtime_run_id"] = run_id
+
+print("risk_evidence_score 統計：")
+print(gdf["risk_evidence_score"].describe())
+
+print("\nobservation_gap_score 統計：")
+print(gdf["observation_gap_score"].describe())
 
 
 print("silent_risk_score 統計：")

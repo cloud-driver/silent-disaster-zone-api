@@ -171,7 +171,12 @@ Outputs
 
 ## 8. Scoring Logic
 
-MVP 先使用可解釋的規則式分數產生基準分數，再由神經網路 scoring layer 輸出正式採用的 `silent_risk_score`。
+MVP 的正式排序使用可解釋的規則式分數 `silent_risk_rule_score`，
+並以其作為 API 回傳的 `silent_risk_score`。
+
+神經網路輸出 `silent_risk_nn_score` 僅供實驗性比較、
+未來替換模型驗證與資料品質研究，
+目前不參與正式優先順序判定。
 
 核心概念：
 
@@ -193,6 +198,14 @@ silent_risk_score
 - 風險高，但最近沒有通報 → 沉默風險上升。
 - 風險高，但已有通報 → 沉默風險下降。
 - 風險低，即使沒有通報 → 不會被誤判為沉默災區。
+
+### Scoring Consistency
+
+批次資料 pipeline 與即時資料 pipeline 共用
+`src/scoring/silent_risk.py` 的正式計分公式。
+
+因此，不論資料由完整批次流程或即時 refresh 流程產生，
+`silent_risk_score` 的計算邏輯皆保持一致。
 
 ---
 
