@@ -481,6 +481,20 @@ Example:
 curl http://127.0.0.1:8000/silent-risk.geojson
 ```
 
+### Dataset Metadata
+
+`/health`、`/silent-risk`、`/silent-risk/top`、
+`/silent-risk/{village_id}` 與 `/advisor/command`
+會回傳 `meta` 欄位，揭露目前輸出的資料狀態。
+
+- `data_mode`: `live`、`batch`、`sample` 或 `unverified`
+- `verification`: 是否由完成的 pipeline manifest 驗證
+- `generated_at`: 資料輸出生成時間
+- `freshness`: `fresh`、`stale`、`expired`、`not_realtime` 或 `sample_data`
+- `source_status`: 即時資料來源抓取狀態
+- `scoring_mode`: 正式排序使用的計分模式
+- `model_status`: 神經網路模型是否僅供實驗比較
+
 ---
 
 ## 15. Client Sample

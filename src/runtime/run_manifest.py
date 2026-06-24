@@ -127,3 +127,30 @@ def mark_scoring_complete(
     write_manifest(manifest)
 
     return manifest
+
+def write_batch_manifest(
+    outputs: dict[str, str],
+) -> dict[str, Any]:
+    generated_at = now_iso()
+
+    manifest = {
+        "schema_version": "1.0",
+        "run_id": (
+            "batch_"
+            + datetime.now().strftime("%Y%m%d_%H%M%S")
+        ),
+        "data_mode": "batch",
+        "pipeline_status": "scoring_completed",
+        "created_at": generated_at,
+        "fetch_completed_at": None,
+        "generated_at": generated_at,
+        "outputs": outputs,
+        "sources": {},
+        "notes": [
+            "資料由完整批次 pipeline 產生，並非即時抓取。",
+        ],
+    }
+
+    write_manifest(manifest)
+
+    return manifest

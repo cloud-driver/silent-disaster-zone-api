@@ -9,59 +9,69 @@ from fastapi import FastAPI, HTTPException, Query
 from src.advisor.command_advisor import generate_command_advice
 from src.advisor.ollama_client import OllamaError, check_ollama, get_ollama_settings
 
+from src.api.output_metadata import (
+    build_dataset_metadata,
+    get_available_geojson_path as resolve_geojson_path,
+    get_available_json_path as resolve_json_path,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT_JSON = PROJECT_ROOT / "outputs" / "latest" / "silent_risk.json"
-OUTPUT_GEOJSON = PROJECT_ROOT / "outputs" / "latest" / "silent_risk.geojson"
-SAMPLE_JSON = PROJECT_ROOT / "sample_outputs" / "silent_risk_sample.json"
-SAMPLE_GEOJSON = PROJECT_ROOT / "sample_outputs" / "silent_risk_sample.geojson"
 PIPELINE_SCRIPT = PROJECT_ROOT / "scripts" / "run_pipeline.py"
-
 
 app = FastAPI(
     title="Silent Disaster Zone Detection API",
-    description="Detect high-risk but low-report villages in Hualien MVP.",
-    version="0.1.0",
+    description=(
+        "Detect high-risk but low-report villages "
+        "in the Hualien MVP area."
+    ),
+    version="0.2.0",
 )
 
 
 def get_available_json_path():
-    if OUTPUT_JSON.exists():
-        return OUTPUT_JSON
+    path = resolve_json_path()
 
-    if SAMPLE_JSON.exists():
-        return SAMPLE_JSON
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No silent risk JSON found. "
+                "Run the pipeline or provide sample outputs."
+            ),
+        )
 
-    raise HTTPException(
-        status_code=404,
-        detail=(
-            "No silent risk JSON found. "
-            "Expected outputs/latest/silent_risk.json or sample_outputs/silent_risk_sample.json."
-        ),
-    )
+    return path
 
 
 def get_available_geojson_path():
-    if OUTPUT_GEOJSON.exists():
-        return OUTPUT_GEOJSON
+    path = resolve_geojson_path()
 
-    if SAMPLE_GEOJSON.exists():
-        return SAMPLE_GEOJSON
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No silent risk GeoJSON found. "
+                "Run the pipeline or provide sample outputs."
+            ),
+        )
 
-    raise HTTPException(
-        status_code=404,
-        detail=(
-            "No silent risk GeoJSON found. "
-            "Expected outputs/latest/silent_risk.geojson or sample_outputs/silent_risk_sample.geojson."
-        ),
-    )
+    return path
 
 
 def load_silent_risk():
     json_path = get_available_json_path()
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    with open(json_path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, list):
+        raise HTTPException(
+            status_code=500,
+            detail="silent_risk.json must contain a JSON list.",
+        )
+
+    return data, build_dataset_metadata(data)
 
 def run_script(script_name: str):
     script_path = PROJECT_ROOT / "scripts" / script_name
@@ -129,32 +139,34 @@ def root():
 
 @app.get("/health")
 def health():
-    model_path = PROJECT_ROOT / "models" / "silent_risk_mlp.joblib"
-    metadata_path = PROJECT_ROOT / "models" / "silent_risk_mlp_metadata.json"
+    model_path = (
+        PROJECT_ROOT
+        / "models"
+        / "silent_risk_mlp.joblib"
+    )
 
-    active_json_path = None
-    active_geojson_path = None
+    metadata_path = (
+        PROJECT_ROOT
+        / "models"
+        / "silent_risk_mlp_metadata.json"
+    )
 
-    if OUTPUT_JSON.exists():
-        active_json_path = str(OUTPUT_JSON.relative_to(PROJECT_ROOT))
-    elif SAMPLE_JSON.exists():
-        active_json_path = str(SAMPLE_JSON.relative_to(PROJECT_ROOT))
-
-    if OUTPUT_GEOJSON.exists():
-        active_geojson_path = str(OUTPUT_GEOJSON.relative_to(PROJECT_ROOT))
-    elif SAMPLE_GEOJSON.exists():
-        active_geojson_path = str(SAMPLE_GEOJSON.relative_to(PROJECT_ROOT))
+    dataset = build_dataset_metadata()
 
     return {
-        "status": "ok",
-        "silent_risk_json_exists": OUTPUT_JSON.exists(),
-        "silent_risk_geojson_exists": OUTPUT_GEOJSON.exists(),
-        "sample_json_exists": SAMPLE_JSON.exists(),
-        "sample_geojson_exists": SAMPLE_GEOJSON.exists(),
-        "active_json_path": active_json_path,
-        "active_geojson_path": active_geojson_path,
-        "nn_model_exists": model_path.exists(),
-        "nn_model_metadata_exists": metadata_path.exists(),
+        "status": (
+            "ok"
+            if dataset["availability"] == "ready"
+            else "degraded"
+        ),
+        "dataset": dataset,
+        "nn_model": {
+            "exists": model_path.exists(),
+            "metadata_exists": metadata_path.exists(),
+        },
+        "advisor": {
+            "optional": True,
+        },
     }
 
 @app.get("/model/info")
@@ -183,7 +195,7 @@ def get_silent_risk(
     if refresh:
         refresh_logs = refresh_realtime_pipeline()
 
-    data = load_silent_risk()
+    data, metadata = load_silent_risk()
 
     if level:
         data = [row for row in data if row.get("silent_risk_level") == level]
@@ -191,10 +203,12 @@ def get_silent_risk(
     if town_name:
         data = [row for row in data if row.get("town_name") == town_name]
 
+    metadata["returned_count"] = len(data)
+
     return {
+        "meta": metadata,
         "count": len(data),
         "refreshed": refresh,
-        "refresh_logs": refresh_logs,
         "data": data,
     }
 
@@ -209,7 +223,7 @@ def get_top_silent_risk(
     if refresh:
         refresh_logs = refresh_realtime_pipeline()
 
-    data = load_silent_risk()
+    data, metadata = load_silent_risk()
 
     data = sorted(
         data,
@@ -217,21 +231,28 @@ def get_top_silent_risk(
         reverse=True,
     )
 
+    metadata["returned_count"] = min(limit, len(data))
+
     return {
+        "meta": metadata,
         "count": min(limit, len(data)),
         "refreshed": refresh,
-        "refresh_logs": refresh_logs,
         "data": data[:limit],
     }
 
 
 @app.get("/silent-risk/{village_id}")
 def get_silent_risk_by_village(village_id: str):
-    data = load_silent_risk()
+    data, metadata = load_silent_risk()
 
     for row in data:
         if str(row.get("village_id")) == str(village_id):
-            return row
+            metadata["returned_count"] = 1
+
+            return {
+                "meta": metadata,
+                "data": row,
+            }
 
     raise HTTPException(
         status_code=404,
@@ -276,11 +297,12 @@ def run_pipeline():
         "status": "success",
         "message": "Pipeline completed successfully.",
         "outputs": [
-            "outputs/silent_risk.json",
-            "outputs/silent_risk.csv",
-            "outputs/silent_risk.geojson",
+            "outputs/latest/silent_risk.json",
+            "outputs/latest/silent_risk.csv",
+            "outputs/latest/silent_risk.geojson",
+            "outputs/latest/run_manifest.json",
         ],
-        "stdout_tail": result.stdout[-4000:],
+        "meta": build_dataset_metadata(),
     }
 
 @app.get("/advisor/health")
@@ -306,7 +328,7 @@ def get_command_advice(
     if refresh:
         refresh_logs = refresh_realtime_pipeline()
 
-    data = load_silent_risk()
+    data, metadata = load_silent_risk()
 
     try:
         advice_result = generate_command_advice(
@@ -317,12 +339,12 @@ def get_command_advice(
         return {
             "status": "success",
             "refreshed": refresh,
-            "refresh_logs": refresh_logs,
             "advisor_type": "ollama_local_llm",
             "model": advice_result["model"],
             "base_url": advice_result["base_url"],
             "selected_villages": advice_result["selected_villages"],
             "advice": advice_result["advice"],
+            "meta": metadata,
             "disclaimer": (
                 "This is an AI-generated command briefing for decision support only. "
                 "It is not an official disaster declaration or evacuation order."

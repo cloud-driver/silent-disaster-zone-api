@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.scoring.silent_risk import apply_silent_risk_scoring
+from src.runtime.run_manifest import write_batch_manifest
 
 
 input_path = (
@@ -239,3 +240,19 @@ with open(output_json_path, "w", encoding="utf-8") as f:
 print("完成：", output_geojson_path)
 print("完成：", output_csv_path)
 print("完成：", output_json_path)
+
+write_batch_manifest(
+    outputs={
+        "silent_risk_json": str(
+            output_json_path.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_csv": str(
+            output_csv_path.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_geojson": str(
+            output_geojson_path.relative_to(PROJECT_ROOT)
+        ),
+    },
+)
+
+print("完成 manifest：outputs/latest/run_manifest.json")
