@@ -7,7 +7,9 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 
 from src.advisor.command_advisor import generate_command_advice
-from src.advisor.ollama_client import OllamaError, check_ollama, get_ollama_settings
+from src.advisor.ollama_client import check_ollama
+from src.api.reports import router as reports_router
+from src.reports.store import get_report_summary
 
 from src.api.output_metadata import (
     build_dataset_metadata,
@@ -28,6 +30,7 @@ app = FastAPI(
     version="0.2.0",
 )
 
+app.include_router(reports_router)
 
 def get_available_json_path():
     path = resolve_json_path()
@@ -320,52 +323,54 @@ def advisor_health():
 
 @app.get("/advisor/command")
 def get_command_advice(
-    limit: int = Query(default=5, ge=1, le=10),
-    refresh: bool = Query(default=False, description="是否先抓取即時資料並重算沉默風險"),
+    limit: int = Query(
+        default=5,
+        ge=1,
+        le=10,
+    ),
+    refresh: bool = Query(
+        default=False,
+        description="是否先抓取即時資料並重算沉默風險",
+    ),
 ):
-    refresh_logs = None
-
     if refresh:
-        refresh_logs = refresh_realtime_pipeline()
+        refresh_realtime_pipeline()
 
     data, metadata = load_silent_risk()
 
-    try:
-        advice_result = generate_command_advice(
-            records=data,
-            limit=limit,
-        )
+    metadata["returned_count"] = len(data)
 
-        return {
-            "status": "success",
-            "refreshed": refresh,
-            "advisor_type": "ollama_local_llm",
+    report_summary = get_report_summary()
+
+    advice_result = generate_command_advice(
+        records=data,
+        dataset_metadata=metadata,
+        report_summary=report_summary,
+        limit=limit,
+    )
+
+    return {
+        "status": (
+            "success"
+            if advice_result["advisor_status"] == "available"
+            else "partial"
+        ),
+        "refreshed": refresh,
+        "meta": metadata,
+        "report_intake": report_summary,
+        "advisor": {
+            "type": "ollama_local_llm",
+            "status": advice_result["advisor_status"],
             "model": advice_result["model"],
             "base_url": advice_result["base_url"],
-            "selected_villages": advice_result["selected_villages"],
-            "advice": advice_result["advice"],
-            "meta": metadata,
-            "disclaimer": (
-                "This is an AI-generated command briefing for decision support only. "
-                "It is not an official disaster declaration or evacuation order."
-            ),
-        }
-
-    except OllamaError as e:
-        settings = get_ollama_settings()
-
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": "Ollama advisor is unavailable.",
-                "error": str(e),
-                "expected_base_url": settings["base_url"],
-                "configured_model": settings["model"],
-                "how_to_fix": [
-                    "Install Ollama.",
-                    "Run: ollama serve",
-                    f"Run: ollama pull {settings['model']}",
-                    "Then call /advisor/health again.",
-                ],
-            },
-        )
+        },
+        "command_plan": advice_result["command_plan"],
+        "narrative": advice_result["narrative"],
+        "fallback_message": advice_result[
+            "fallback_message"
+        ],
+        "disclaimer": (
+            "此結果僅供人工確認、巡查與資源準備參考，"
+            "不是官方災害判定或強制命令。"
+        ),
+    }

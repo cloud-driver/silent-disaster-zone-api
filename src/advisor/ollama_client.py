@@ -73,6 +73,7 @@ def chat_with_ollama(
     user_prompt: str,
     temperature: float = 0.2,
     timeout: int = 120,
+    response_format: str | dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Send a chat request to the local Ollama API.
@@ -105,6 +106,9 @@ def chat_with_ollama(
             "temperature": temperature,
         },
     }
+
+    if response_format is not None:
+        payload["format"] = response_format
 
     try:
         response = requests.post(url, json=payload, timeout=timeout)
