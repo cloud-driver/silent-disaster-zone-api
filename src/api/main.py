@@ -16,7 +16,7 @@ from src.api.output_metadata import (
     get_available_geojson_path as resolve_geojson_path,
     get_available_json_path as resolve_json_path,
 )
-
+from src.api.line_webhook import router as line_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PIPELINE_SCRIPT = PROJECT_ROOT / "scripts" / "run_pipeline.py"
@@ -31,6 +31,7 @@ app = FastAPI(
 )
 
 app.include_router(reports_router)
+app.include_router(line_router)
 
 def get_available_json_path():
     path = resolve_json_path()
@@ -136,6 +137,8 @@ def root():
             "/silent-risk/{village_id}",
             "/silent-risk.geojson",
             "/pipeline/run",
+            "/line/health",
+            "/line/webhook",
         ],
     }
 
