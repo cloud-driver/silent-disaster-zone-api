@@ -404,6 +404,31 @@ def list_reports(
         connection.close()
 
 
+def list_verified_reports(
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    init_db(db_path)
+
+    connection = get_connection(db_path)
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM disaster_reports
+            WHERE status = 'verified'
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+        return [
+            row_to_dict(row)
+            for row in rows
+        ]
+
+    finally:
+        connection.close()
+
 def review_report(
     *,
     report_id: str,

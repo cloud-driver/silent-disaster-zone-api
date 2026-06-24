@@ -20,6 +20,21 @@ from src.runtime.run_manifest import (
 BASE_INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "villages_hualien_with_reports.geojson"
 REALTIME_FEATURES_PATH = PROJECT_ROOT / "data" / "realtime" / "latest" / "realtime_features.csv"
 
+VERIFIED_REPORT_FEATURES_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "realtime"
+    / "latest"
+    / "verified_report_features.csv"
+)
+
+VERIFIED_INCIDENTS_PATH = (
+    PROJECT_ROOT
+    / "outputs"
+    / "latest"
+    / "verified_incidents.json"
+)
+
 OUTPUT_LATEST_DIR = PROJECT_ROOT / "outputs" / "latest"
 OUTPUT_HISTORY_ROOT = PROJECT_ROOT / "outputs" / "history"
 
@@ -135,6 +150,18 @@ if not BASE_INPUT_PATH.exists():
 if not REALTIME_FEATURES_PATH.exists():
     raise FileNotFoundError(f"找不到即時特徵：{REALTIME_FEATURES_PATH}")
 
+if not VERIFIED_REPORT_FEATURES_PATH.exists():
+    raise FileNotFoundError(
+        "找不到已驗證通報特徵："
+        f"{VERIFIED_REPORT_FEATURES_PATH}"
+    )
+
+if not VERIFIED_INCIDENTS_PATH.exists():
+    raise FileNotFoundError(
+        "找不到已驗證事件 snapshot："
+        f"{VERIFIED_INCIDENTS_PATH}"
+    )
+
 gdf = gpd.read_file(BASE_INPUT_PATH)
 
 realtime = pd.read_csv(
@@ -142,7 +169,11 @@ realtime = pd.read_csv(
     encoding="utf-8-sig",
     dtype={"village_id": str}
 )
-
+verified_reports = pd.read_csv(
+    VERIFIED_REPORT_FEATURES_PATH,
+    encoding="utf-8-sig",
+    dtype={"village_id": str},
+)
 gdf["village_id"] = gdf["village_id"].astype(str)
 realtime["village_id"] = realtime["village_id"].astype(str)
 
@@ -181,8 +212,89 @@ for col in realtime_cols:
 print("合併後筆數：", len(gdf))
 print("realtime_event_score 最大值：", gdf["realtime_event_score"].max())
 
+print("\n=== 3. 合併已驗證民眾通報特徵 ===")
 
-print("\n=== 3. 檢查必要欄位 ===")
+report_feature_cols = [
+    "village_id",
+    "verified_report_count_6h",
+    "verified_report_count_24h",
+    "verified_report_severity_sum_6h",
+    "verified_report_severity_sum_24h",
+    "verified_report_max_severity_6h",
+    "verified_report_max_severity_24h",
+    "report_data_source",
+    "report_feature_run_id",
+    "report_feature_generated_at",
+]
+
+missing_report_cols = [
+    column
+    for column in report_feature_cols
+    if column not in verified_reports.columns
+]
+
+if missing_report_cols:
+    raise ValueError(
+        "已驗證通報特徵缺少欄位："
+        f"{missing_report_cols}"
+    )
+
+verified_reports["village_id"] = (
+    verified_reports["village_id"].astype(str)
+)
+
+gdf = gdf.merge(
+    verified_reports[report_feature_cols],
+    on="village_id",
+    how="left",
+)
+
+numeric_report_cols = [
+    "verified_report_count_6h",
+    "verified_report_count_24h",
+    "verified_report_severity_sum_6h",
+    "verified_report_severity_sum_24h",
+    "verified_report_max_severity_6h",
+    "verified_report_max_severity_24h",
+]
+
+for column in numeric_report_cols:
+    gdf[column] = (
+        gdf[column]
+        .fillna(0)
+        .astype(float)
+    )
+
+gdf["report_data_source"] = (
+    gdf["report_data_source"]
+    .fillna("verified_human_reviewed_reports")
+)
+
+gdf["report_feature_run_id"] = (
+    gdf["report_feature_run_id"]
+    .fillna(run_id)
+)
+
+gdf["report_feature_generated_at"] = (
+    gdf["report_feature_generated_at"]
+    .fillna("")
+)
+
+# Live pipeline 不再混用舊 mock reports。
+gdf["report_count_6h"] = (
+    gdf["verified_report_count_6h"]
+)
+
+gdf["report_count_24h"] = (
+    gdf["verified_report_count_24h"]
+)
+
+print(
+    "verified_report_count_24h 總數：",
+    int(gdf["verified_report_count_24h"].sum()),
+)
+
+print("\n=== 3.5. 檢查必要欄位 ===")
 
 required_columns = [
     "village_id",
@@ -330,6 +442,23 @@ json_columns = [
     "silent_risk_level",
     "silent_reason",
     "realtime_run_id",
+    "verified_report_count_6h",
+    "verified_report_count_24h",
+    "verified_report_severity_sum_6h",
+    "verified_report_severity_sum_24h",
+    "verified_report_max_severity_6h",
+    "verified_report_max_severity_24h",
+    "report_data_source",
+    "report_feature_run_id",
+    "report_feature_generated_at",
+    "risk_evidence_score",
+    "observation_gap_score",
+    "recent_report_score",
+    "older_report_score",
+    "silent_risk_rule_score",
+    "silent_risk_nn_score",
+    "scoring_mode",
+    "model_status",
 ]
 
 json_df = (
@@ -370,6 +499,16 @@ mark_scoring_complete(
         ),
         "silent_risk_geojson": str(
             latest_geojson.relative_to(PROJECT_ROOT)
+        ),
+        "verified_report_features_csv": str(
+            VERIFIED_REPORT_FEATURES_PATH.relative_to(
+                PROJECT_ROOT
+            )
+        ),
+        "verified_incidents_json": str(
+            VERIFIED_INCIDENTS_PATH.relative_to(
+                PROJECT_ROOT
+            )
         ),
     },
 )

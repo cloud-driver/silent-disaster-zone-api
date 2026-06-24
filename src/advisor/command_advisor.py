@@ -58,6 +58,11 @@ def build_prompts(
    - heightened_monitoring：提高確認與交叉查證優先度。
    - priority_verification：優先人工確認與巡查。
 9. 必須輸出符合指定 JSON schema 的 JSON。
+10. verified_incident_queue 是已完成人工查證的民眾回報摘要，
+    必須和 priority_queue 分開描述。
+11. 已驗證回報不等於官方災害宣告，也不得轉換為強制命令。
+12. operational_posture 若為 verified_incident_priority_review，
+    代表需要優先人員研判，不代表自動派遣或官方命令。
 """.strip()
 
     user_prompt = (
@@ -123,12 +128,14 @@ def generate_command_advice(
     records: list[dict[str, Any]],
     dataset_metadata: dict[str, Any],
     report_summary: dict[str, Any],
+    verified_incidents: list[dict[str, Any]] | None = None,
     limit: int = 5,
 ) -> dict[str, Any]:
     command_plan = build_command_plan(
         records=records,
         dataset_metadata=dataset_metadata,
         report_summary=report_summary,
+        verified_incidents=verified_incidents or [],
         limit=limit,
     )
 

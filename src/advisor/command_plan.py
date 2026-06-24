@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.advisor.incident_plan import (
+    build_verified_incident_queue,
+)
+
 
 def safe_float(
     value: Any,
@@ -68,7 +72,19 @@ def priority_level(
 
 def determine_operational_posture(
     priority_queue: list[dict[str, Any]],
+    verified_incident_queue: list[dict[str, Any]],
 ) -> str:
+    incident_priorities = {
+        item.get("priority")
+        for item in verified_incident_queue
+    }
+
+    if "I1" in incident_priorities:
+        return "verified_incident_priority_review"
+
+    if verified_incident_queue:
+        return "verified_incident_review"
+
     priorities = {
         item.get("priority")
         for item in priority_queue
@@ -221,6 +237,7 @@ def build_command_plan(
     records: list[dict[str, Any]],
     dataset_metadata: dict[str, Any],
     report_summary: dict[str, Any],
+    verified_incidents: list[dict[str, Any]] | None = None,
     limit: int = 5,
 ) -> dict[str, Any]:
     sorted_records = sorted(
@@ -259,11 +276,19 @@ def build_command_plan(
             }
         )
 
+    verified_incident_queue = (
+        build_verified_incident_queue(
+            verified_incidents or [],
+            limit=limit,
+        )
+    )
+
     return {
         "plan_version": "1.0",
         "decision_scope": "decision_support_only",
         "operational_posture": determine_operational_posture(
-            priority_queue
+            priority_queue,
+            verified_incident_queue,
         ),
         "dataset": {
             "data_mode": dataset_metadata.get("data_mode"),
@@ -280,6 +305,7 @@ def build_command_plan(
         },
         "report_intake": report_summary,
         "priority_queue": priority_queue,
+        "verified_incident_queue": verified_incident_queue,
         "limitations": build_limitations(
             dataset_metadata,
             report_summary,

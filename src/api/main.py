@@ -4,11 +4,10 @@ import subprocess
 import sys
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 
 from src.advisor.command_advisor import generate_command_advice
 from src.advisor.ollama_client import check_ollama
-from src.api.reports import router as reports_router
 from src.reports.store import get_report_summary
 
 from src.api.output_metadata import (
@@ -17,6 +16,14 @@ from src.api.output_metadata import (
     get_available_json_path as resolve_json_path,
 )
 from src.api.line_webhook import router as line_router
+from src.api.incidents import (
+    load_verified_incident_snapshot,
+    router as incidents_router,
+)
+from src.api.reports import (
+    require_report_admin_key,
+    router as reports_router,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PIPELINE_SCRIPT = PROJECT_ROOT / "scripts" / "run_pipeline.py"
@@ -31,6 +38,7 @@ app = FastAPI(
 )
 
 app.include_router(reports_router)
+app.include_router(incidents_router)
 app.include_router(line_router)
 
 def get_available_json_path():
@@ -113,6 +121,7 @@ def refresh_realtime_pipeline():
     steps = [
         "fetch_realtime_sources.py",
         "normalize_realtime_sources.py",
+        "build_verified_report_features.py",
         "compute_silent_risk_realtime.py",
         "apply_silent_risk_nn.py",
     ]
@@ -139,6 +148,7 @@ def root():
             "/pipeline/run",
             "/line/health",
             "/line/webhook",
+            "/incidents/verified",
         ],
     }
 
@@ -335,6 +345,7 @@ def get_command_advice(
         default=False,
         description="是否先抓取即時資料並重算沉默風險",
     ),
+    _: None = Depends(require_report_admin_key),
 ):
     if refresh:
         refresh_realtime_pipeline()
@@ -345,11 +356,30 @@ def get_command_advice(
 
     report_summary = get_report_summary()
 
+    incident_snapshot = load_verified_incident_snapshot()
+
+    verified_incidents = []
+    incident_alignment = "missing"
+
+    if incident_snapshot["available"]:
+        if (
+            metadata.get("data_mode") == "live"
+            and incident_snapshot["run_id"]
+            == metadata.get("run_id")
+        ):
+            verified_incidents = incident_snapshot["data"]
+            incident_alignment = "aligned"
+        else:
+            incident_alignment = (
+                "not_aligned_with_active_dataset"
+            )
+
     advice_result = generate_command_advice(
         records=data,
         dataset_metadata=metadata,
         report_summary=report_summary,
         limit=limit,
+        verified_incidents=verified_incidents,
     )
 
     return {
@@ -361,6 +391,13 @@ def get_command_advice(
         "refreshed": refresh,
         "meta": metadata,
         "report_intake": report_summary,
+        "verified_incident_snapshot": {
+            "available": incident_snapshot["available"],
+            "alignment": incident_alignment,
+            "run_id": incident_snapshot["run_id"],
+            "generated_at": incident_snapshot["generated_at"],
+            "summary": incident_snapshot["summary"],
+        },
         "advisor": {
             "type": "ollama_local_llm",
             "status": advice_result["advisor_status"],
