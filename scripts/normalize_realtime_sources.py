@@ -4,9 +4,14 @@ import shutil
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
+import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.runtime.run_manifest import load_manifest
 
 RAW_ROOT = PROJECT_ROOT / "data" / "realtime" / "raw"
 PROCESSED_ROOT = PROJECT_ROOT / "data" / "realtime" / "processed"
@@ -15,12 +20,13 @@ LATEST_ROOT = PROJECT_ROOT / "data" / "realtime" / "latest"
 VILLAGES_PATH = PROJECT_ROOT / "data" / "processed" / "villages_hualien_static_risk.geojson"
 
 
-def latest_json(source_name):
-    folder = RAW_ROOT / source_name
-    files = sorted(folder.glob("*.json"))
-    if not files:
-        return None
-    return files[-1]
+def snapshot_for_run(source_name, run_id):
+    path = RAW_ROOT / source_name / f"{run_id}.json"
+
+    if path.exists():
+        return path
+
+    return None
 
 
 def get_run_id_from_path(path):
@@ -375,23 +381,66 @@ def join_points_to_villages(point_gdf, villages, value_columns, prefix):
 
 print("=== Normalize realtime sources ===")
 
-latest_paths = {
-    "cwa_rain": latest_json("cwa_rain"),
-    "ardswc_alert": latest_json("ardswc_alert"),
-    "ardswc_debris_rain": latest_json("ardswc_debris_rain"),
-    "road_traffic": latest_json("road_traffic"),
-}
+manifest = load_manifest()
 
-available_run_ids = [
-    get_run_id_from_path(p)
-    for p in latest_paths.values()
-    if p is not None
+if manifest is None:
+    raise RuntimeError(
+        "找不到 outputs/latest/run_manifest.json。"
+        "請先執行 scripts/fetch_realtime_sources.py。"
+    )
+
+if manifest.get("pipeline_status") not in {
+    "fetch_completed",
+    "scoring_completed",
+}:
+    raise RuntimeError(
+        "目前 realtime fetch 尚未完成，不能開始正規化。"
+    )
+
+run_id = str(manifest.get("run_id", "")).strip()
+
+if not run_id:
+    raise RuntimeError("run_manifest.json 缺少 run_id。")
+
+source_statuses = manifest.get("sources", {})
+
+source_names = [
+    "cwa_rain",
+    "ardswc_alert",
+    "ardswc_debris_rain",
+    "road_traffic",
 ]
 
-if not available_run_ids:
-    raise RuntimeError("找不到任何 realtime raw snapshot")
+latest_paths = {}
 
-run_id = sorted(available_run_ids)[-1]
+for source_name in source_names:
+    source_status = (
+        source_statuses
+        .get(source_name, {})
+        .get("status")
+    )
+
+    snapshot_path = None
+
+    if source_status == "success":
+        snapshot_path = snapshot_for_run(
+            source_name,
+            run_id,
+        )
+
+        if snapshot_path is None:
+            raise RuntimeError(
+                f"{source_name} 在 manifest 標示成功，"
+                f"但找不到 run_id={run_id} 的 snapshot。"
+            )
+
+    latest_paths[source_name] = snapshot_path
+
+    print(
+        f"{source_name}: "
+        f"status={source_status}, "
+        f"snapshot={snapshot_path}"
+    )
 
 print("使用 run_id:", run_id)
 

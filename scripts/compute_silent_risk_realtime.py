@@ -12,6 +12,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.scoring.silent_risk import apply_silent_risk_scoring
 
+from src.runtime.run_manifest import (
+    load_manifest,
+    mark_scoring_complete,
+)
+
 BASE_INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "villages_hualien_with_reports.geojson"
 REALTIME_FEATURES_PATH = PROJECT_ROOT / "data" / "realtime" / "latest" / "realtime_features.csv"
 
@@ -19,15 +24,20 @@ OUTPUT_LATEST_DIR = PROJECT_ROOT / "outputs" / "latest"
 OUTPUT_HISTORY_ROOT = PROJECT_ROOT / "outputs" / "history"
 
 
-def get_latest_run_id():
-    processed_root = PROJECT_ROOT / "data" / "realtime" / "processed"
+def get_active_run_id():
+    manifest = load_manifest()
 
-    run_dirs = sorted([p for p in processed_root.iterdir() if p.is_dir()])
+    if manifest is None:
+        raise RuntimeError(
+            "找不到 run_manifest.json，請先執行 realtime fetch。"
+        )
 
-    if not run_dirs:
-        return "manual"
+    run_id = str(manifest.get("run_id", "")).strip()
 
-    return run_dirs[-1].name
+    if not run_id:
+        raise RuntimeError("run_manifest.json 缺少 run_id。")
+
+    return run_id
 
 
 def assign_level(score):
@@ -136,7 +146,7 @@ realtime = pd.read_csv(
 gdf["village_id"] = gdf["village_id"].astype(str)
 realtime["village_id"] = realtime["village_id"].astype(str)
 
-run_id = get_latest_run_id()
+run_id = get_active_run_id()
 
 print("基礎主表筆數：", len(gdf))
 print("即時特徵筆數：", len(realtime))
@@ -348,3 +358,20 @@ print("完成：", latest_json)
 print("完成：", history_geojson)
 print("完成：", history_csv)
 print("完成：", history_json)
+
+mark_scoring_complete(
+    run_id=run_id,
+    outputs={
+        "silent_risk_json": str(
+            latest_json.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_csv": str(
+            latest_csv.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_geojson": str(
+            latest_geojson.relative_to(PROJECT_ROOT)
+        ),
+    },
+)
+
+print("完成 manifest：outputs/latest/run_manifest.json")

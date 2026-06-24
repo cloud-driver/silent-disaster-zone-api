@@ -574,6 +574,17 @@ py -3.12 scripts/run_pipeline.py
 
 The full pipeline will regenerate processed features and output files from the raw datasets.
 
+### Realtime Run Consistency
+
+每次即時抓取會建立 `outputs/latest/run_manifest.json`，
+記錄當次 `run_id`、資料來源狀態、抓取時間與最終輸出檔案。
+
+正規化與計分流程只會使用同一個 `run_id` 的 raw snapshots，
+避免將不同時間點的雨量、土石流警戒與路況資料混合計算。
+
+若某來源抓取失敗或未設定，manifest 會明確標示其狀態，
+系統不會自動使用舊 snapshot 假裝成最新資料。
+
 ---
 
 ## 17. Reproducing the Neural Network Scoring Layer
