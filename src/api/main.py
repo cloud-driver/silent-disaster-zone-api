@@ -4,7 +4,12 @@ import subprocess
 import sys
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+)
 
 from src.advisor.command_advisor import generate_command_advice
 from src.advisor.ollama_client import check_ollama
@@ -16,30 +21,46 @@ from src.api.output_metadata import (
     get_available_json_path as resolve_json_path,
 )
 from src.api.line_webhook import router as line_router
-from src.api.incidents import (
-    load_verified_incident_snapshot,
-    router as incidents_router,
+from src.api.docs import (
+    TAGS_METADATA,
+    configure_openapi,
+    redoc_html,
+    swagger_ui_html,
 )
+from src.api.incidents import router as incidents_router
 from src.api.reports import (
     require_report_admin_key,
     router as reports_router,
 )
-
+from src.api.auth import router as auth_router
+from src.auth.middleware import access_token_middleware
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PIPELINE_SCRIPT = PROJECT_ROOT / "scripts" / "run_pipeline.py"
 
 app = FastAPI(
     title="Silent Disaster Zone Detection API",
-    description=(
-        "Detect high-risk but low-report villages "
-        "in the Hualien MVP area."
+    summary=(
+        "沉默災區偵測、LINE 民眾回報與"
+        "已驗證事件整合 API"
     ),
-    version="0.2.0",
+    description=(
+        "提供沉默災區偵測、LINE 災情回報、"
+        "人工審核、已驗證事件與指揮建議。"
+    ),
+    version="0.3.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_tags=TAGS_METADATA,
 )
 
+app.include_router(auth_router)
 app.include_router(reports_router)
 app.include_router(incidents_router)
 app.include_router(line_router)
+
+configure_openapi(app)
+
+app.middleware("http")(access_token_middleware)
 
 def get_available_json_path():
     path = resolve_json_path()
@@ -149,6 +170,9 @@ def root():
             "/line/health",
             "/line/webhook",
             "/incidents/verified",
+            "/auth/login",
+            "/auth/session",
+            "/auth/logout",
         ],
     }
 
@@ -285,7 +309,9 @@ def get_silent_risk_geojson():
 
 
 @app.post("/pipeline/run")
-def run_pipeline():
+def run_pipeline(
+    _: None = Depends(require_report_admin_key),
+):
     if not PIPELINE_SCRIPT.exists():
         raise HTTPException(
             status_code=404,
@@ -414,3 +440,18 @@ def get_command_advice(
             "不是官方災害判定或強制命令。"
         ),
     }
+
+@app.get(
+    "/docs",
+    include_in_schema=False,
+)
+def custom_swagger_docs():
+    return swagger_ui_html(app)
+
+
+@app.get(
+    "/redoc",
+    include_in_schema=False,
+)
+def custom_redoc_docs():
+    return redoc_html(app)
