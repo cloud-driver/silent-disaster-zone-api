@@ -10,7 +10,9 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Security,
 )
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from src.reports.store import (
@@ -20,6 +22,15 @@ from src.reports.store import (
     review_report,
 )
 
+report_admin_key_scheme = APIKeyHeader(
+    name="X-Admin-Key",
+    scheme_name="ReportAdminKey",
+    description=(
+        "管理者 API 金鑰。"
+        "必填；可於 Swagger UI 右上角 Authorize 設定。"
+    ),
+    auto_error=False,
+)
 
 router = APIRouter(
     prefix="/reports",
@@ -30,24 +41,41 @@ init_db()
 
 
 class ReviewRequest(BaseModel):
-    decision: Literal["verified", "rejected"]
+    decision: Literal["verified", "rejected"] = Field(
+        ...,
+        description=(
+            "【必填】人工審核結果。"
+            "verified 代表確認有效；"
+            "rejected 代表拒絕、重複或資訊不足。"
+        ),
+        examples=["verified"],
+    )
 
     reviewer_id: str = Field(
         default="admin",
         min_length=1,
         max_length=80,
+        description=(
+            "【選填】執行審核的人員識別名稱。"
+            "預設值：admin。"
+        ),
+        examples=["duty-officer"],
     )
 
     reviewer_note: str = Field(
         default="",
         max_length=1000,
+        description=(
+            "【選填】人工審核備註。"
+            "預設值：空字串。最長 1000 字。"
+        ),
+        examples=["已由里長確認道路積水。"],
     )
 
 
 def require_report_admin_key(
-    x_admin_key: str | None = Header(
-        default=None,
-        alias="X-Admin-Key",
+    x_admin_key: str | None = Security(
+        report_admin_key_scheme,
     ),
 ) -> None:
     configured_key = os.getenv(
