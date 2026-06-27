@@ -10,6 +10,7 @@ from fastapi import (
     HTTPException,
     Query,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.advisor.command_advisor import generate_command_advice
 from src.advisor.ollama_client import check_ollama
@@ -27,7 +28,10 @@ from src.api.docs import (
     redoc_html,
     swagger_ui_html,
 )
-from src.api.incidents import router as incidents_router
+from src.api.incidents import (
+    load_verified_incident_snapshot,
+    router as incidents_router,
+)
 from src.api.reports import (
     require_report_admin_key,
     router as reports_router,
@@ -61,6 +65,15 @@ app.include_router(line_router)
 configure_openapi(app)
 
 app.middleware("http")(access_token_middleware)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After"],
+)
 
 def get_available_json_path():
     path = resolve_json_path()

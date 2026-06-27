@@ -1,0 +1,21 @@
+Silent Zone Operations Console：本機啟動方式
+
+1. 先在專案根目錄啟動 FastAPI 後端：
+   python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+
+2. 開另一個終端機，切換到本資料夾後執行：
+   python3 run_console.py --open-browser
+
+3. 瀏覽器應開啟：
+   http://127.0.0.1:5500/
+
+4. 不要直接雙擊 index.html，也不要用 file:// 開啟。
+   直接用 file:// 時，瀏覽器可能不會穩定保存 sessionStorage，
+   造成登入後在 UI 類別間切換時看起來像重新登入。
+
+5. 在【01】登入與連線中輸入：
+   Base URL: http://127.0.0.1:8000
+   帳號：AUTH_LOGIN_USERNAME
+   密碼：你的登入密碼
+
+6. Token 本身固定只有 15 分鐘有效；過期後重新登入是正常行為。
