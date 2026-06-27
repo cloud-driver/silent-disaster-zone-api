@@ -1,257 +1,346 @@
 # Silent Disaster Zone Detection API
 
-> 沉默災區偵測 API 是一個防災資料分析元件，用來找出「高風險但低通報、低觀測覆蓋」的村里，協助災防單位優先派員確認那些可能被系統忽略的區域。
+> **防災積木元件創新賽｜沉默災區偵測、LINE 民眾回報與已驗證事件整合 API**
+>
+> 用於辨識「**高風險、低觀測、低通報**」的村里，協助防災人員主動確認可能被既有通報系統忽略的區域；同時提供 LINE 民眾回報、人工查證、已驗證事件快照、規則式指揮隊列與受限制的 AI 摘要。
 
-GitHub Repository: <https://github.com/cloud-driver/silent-disaster-zone-api>
-
----
-
-## 1. Project Overview
-
-災情通報多的地方不一定最危險。真正需要被注意的地方，可能因為斷訊、交通中斷、高齡人口比例高、感測器覆蓋不足或數位通報能力低，反而沒有即時回報。
-
-本專案的目標不是取代災害預測模型，而是提供一個可重複使用的 API 元件，輸出「高風險但低通報」的優先關注清單，讓防災系統、地圖儀表板或巡查派工流程可以快速整合。
+Repository: https://github.com/cloud-driver/silent-disaster-zone-api
 
 ---
 
-## 2. Component Type
+## 目錄
 
-本作品定位為 **API 服務型元件（Service Component）**。
+- [專案定位](#專案定位)
+- [核心能力](#核心能力)
+- [安全與使用界線](#安全與使用界線)
+- [系統架構與資料流](#系統架構與資料流)
+- [風險計分與雙隊列](#風險計分與雙隊列)
+- [LINE 民眾回報流程](#line-民眾回報流程)
+- [資料模式與輸出可信度](#資料模式與輸出可信度)
+- [環境需求與安裝](#環境需求與安裝)
+- [環境變數設定](#環境變數設定)
+- [啟動 API 與 Swagger Portal](#啟動-api-與-swagger-portal)
+- [登入與 API 驗證](#登入與-api-驗證)
+- [API 總覽](#api-總覽)
+- [即時資料流程](#即時資料流程)
+- [測試](#測試)
+- [輸出格式](#輸出格式)
+- [專案結構](#專案結構)
+- [資料與隱私政策](#資料與隱私政策)
+- [限制與後續方向](#限制與後續方向)
 
-它可以被整合到：
+---
+
+## 專案定位
+
+傳統災情系統通常依賴「已發生且已通報」的資料來排序。然而，真正需要優先確認的區域，可能因為通訊中斷、交通受阻、感測器不足、高齡人口比例高、數位通報能力不足等因素，反而沒有即時回報。
+
+本專案關注的不是「哪裡通報最多」，而是：
+
+```text
+高風險
+＋ 觀測不足
+＋ 通報不足
+＝ 值得優先主動確認的沉默災區候選區域
+```
+
+本元件定位為可重複整合的 **Service Component / API Component**，可被接入：
 
 - 災害應變儀表板
-- 地圖系統
-- LINE Bot 通報系統
-- 地方政府災情查報流程
-- 巡查任務派發系統
+- 地圖與 GIS 圖台
+- 巡查派工或志工調度系統
+- LINE 官方帳號民眾回報流程
+- 地方災情查報與人工審核流程
 - 其他防災資料平台
 
 ---
 
-## 3. Key Features
+## 核心能力
 
-- 整合村里界、人口、高齡比例、淹水潛勢、土石流影響範圍。
-- 串接即時資料來源，包括中央氣象署雨量、農村水保署土石流資料、警廣即時路況。
-- 每次即時更新皆可保存 raw snapshot 與 history output。
-- 產出 `silent_risk.json`、`silent_risk.csv`、`silent_risk.geojson`。
-- 提供 FastAPI 查詢介面與 Swagger/OpenAPI 文件。
-- 支援神經網路 scoring layer。
-- 保留規則式分數與神經網路分數，方便比較與解釋。
-- Repository 內建 sample outputs，評審 clone 後不需下載大型 raw data 也能快速 demo API。
+### 1. 沉默災區偵測
 
----
+- 以花蓮縣村里為 MVP 分析單位。
+- 整合靜態災害風險、感測器覆蓋缺口、即時事件訊號與近時通報活動。
+- 產出可供 API、表格、地圖使用的 JSON、CSV、GeoJSON。
 
-## 4. Problem
+### 2. 即時資料一致性
 
-傳統災情系統通常依賴「已通報資料」來判斷災情熱區，但高風險區可能因為以下原因沒有通報：
+- 即時抓取會建立單一 `run_id`。
+- 同一輪正規化與計分只使用該 `run_id` 的 raw snapshots。
+- 以 `outputs/latest/run_manifest.json` 記錄資料來源、抓取狀態、輸出路徑與生成時間。
+- 外部來源失敗時會保留來源狀態，不會將舊資料偽裝為最新資料。
 
-- 通訊中斷
-- 高齡人口比例高
-- 交通中斷
-- 感測器覆蓋不足
-- 數位通報能力不足
-- 地方災情尚未被回報
+### 3. LINE 民眾災情回報
 
-因此，本元件關注的是：
+- 支援災情類型、嚴重程度、LINE 位置與文字描述。
+- 原始 LINE user ID 不會直接寫入通報資料表，而是以 HMAC 雜湊保存。
+- 每筆 LINE 回報先進入 `pending`，不會直接影響正式風險排序。
+- webhook 使用 `X-Line-Signature` 驗證，並以 `webhookEventId` 避免重複處理。
 
-> 高風險，但低通報或低觀測覆蓋的區域。
+### 4. 人工查證與已驗證事件
 
----
+- 管理者可將回報審核為 `verified` 或 `rejected`。
+- 僅 `verified` 通報會被納入 live pipeline 的近 6 / 24 小時通報特徵。
+- 已驗證事件會另外形成 incident queue，不會與「沉默」概念混在同一份清單中。
 
-## 5. MVP Scope
+### 5. 規則式決策支援與 AI 摘要
 
-目前 MVP 範圍為 **花蓮縣村里層級分析**。
+- 正式排序使用可解釋的 `rule_based_mvp`。
+- AI / Ollama 僅將既有的規則式隊列整理成人可讀摘要。
+- AI 不可變更排序、不可新增村里、不可宣稱災害已發生、不可發布撤離或封路命令。
+- Ollama 不可用時，規則式 `command_plan` 仍可使用。
 
-分析單位：
+### 6. 安全 API 與完整 Swagger Portal
 
-- `village_id`
-- `county_name`
-- `town_name`
-- `village_name`
-
-主要輸出：
-
-- `silent_risk_score`
-- `silent_risk_level`
-- `silent_reason`
-- `silent_risk_rule_score`
-- `silent_risk_nn_score`
+- 登入後取得唯一短效 Bearer Token，固定有效 **15 分鐘**。
+- `/auth/login` 同 IP 在滑動 60 秒內最多可呼叫 **5 次**。
+- 一般 API 需要 Bearer Token。
+- 高權限管理操作另需要固定 `REPORT_ADMIN_KEY`。
+- Swagger UI 依功能分組、以 API 編號呈現，並標示輸入欄位的位置、必填性、預設值、用途與範例。
 
 ---
 
-## 6. Data Sources
+## 安全與使用界線
 
-### 6.1 Static / Low-frequency Data
+本系統是**決策支援元件**，不是官方災害宣告、救災派遣或強制命令系統。
 
-- 村里界圖資
-- 人口與年齡結構資料
-- 淹水潛勢圖
-- 土石流影響範圍圖
+請務必遵守：
 
-### 6.2 Realtime / Snapshot Data
-
-- 中央氣象署雨量觀測資料
-- 農村水保署土石流及大規模崩塌警戒資料
-- 農村水保署土石流潛勢溪流參考雨量資料
-- 警廣即時路況資料
-
-### 6.3 Mock Data
-
-目前通報資料使用 mock reports，用於驗證「高風險但低通報」偵測邏輯。
-
-正式版可串接：
-
-- LINE Bot
-- 119
-- 1999
-- 地方災情通報系統
-- 表單通報資料
-- 巡查回報系統
+1. `silent_risk_score` 代表「主動確認優先程度」，**不代表災害已發生**。
+2. `pending` 民眾回報尚未人工確認，**不得當作已驗證災情**。
+3. `verified` 回報代表已完成人工查證，但仍不等同官方災害宣告。
+4. 不得直接以 API 或 AI 輸出作為撤離、封路、停班停課、資源強制調度等命令依據。
+5. AI 只負責整理資料；最終判斷與行動仍須由具權責的人員完成。
 
 ---
 
-## 7. Input / Process / Output
+## 系統架構與資料流
 
-### 7.1 Input
+```mermaid
+flowchart LR
+    A[資料來源<br/>Static / Realtime / Reports]
+    B[資料前處理層<br/>清洗、標準化、空間對應]
+    C[特徵層<br/>Static Features / Realtime Features / Report Features]
+    D[計分層<br/>Rule-based Scoring<br/>NN Scoring]
+    E[輸出層<br/>JSON / CSV / GeoJSON]
+    F[API 服務層<br/>FastAPI / Swagger UI]
+    G[應用層<br/>Dashboard / LINE Bot / 指揮建議]
 
-| Input | Type | Description |
-|---|---|---|
-| Village boundary | GeoJSON / Shapefile | 村里界空間資料 |
-| Population | CSV | 人口數、高齡人口比例 |
-| Flood potential | GeoJSON / Shapefile | 淹水潛勢範圍 |
-| Debris flow area | GeoJSON / Shapefile | 土石流影響範圍 |
-| Realtime rainfall | JSON API snapshot | 即時雨量資料 |
-| Landslide alert / debris rain | JSON API snapshot | 土石流警戒與參考雨量 |
-| Road traffic | JSON API snapshot | 即時路況事件 |
-| Disaster reports | JSON | 通報點位與嚴重度 |
-
-### 7.2 Process
-
-```text
-Raw Data
-  ↓
-Static Pipeline
-  - village boundary
-  - population
-  - flood potential
-  - debris flow area
-  ↓
-Static Risk Features
-  ↓
-Realtime Fetch Pipeline
-  - CWA rainfall
-  - ARDSWC alert
-  - ARDSWC debris rain
-  - road traffic
-  ↓
-Realtime Features
-  ↓
-Report Features
-  ↓
-Scoring Layer
-  - rule-based score
-  - neural network score
-  ↓
-Outputs
-  - JSON
-  - CSV
-  - GeoJSON
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
 ```
 
-### 7.3 Output
-
-| Output | Format | Description |
-|---|---|---|
-| `silent_risk.json` | JSON | API 查詢用的村里沉默風險資料 |
-| `silent_risk.csv` | CSV | 表格分析與人工檢查 |
-| `silent_risk.geojson` | GeoJSON | 地圖圖層展示 |
-
 ---
 
-## 8. Scoring Logic
+## 風險計分與雙隊列
 
-MVP 先使用可解釋的規則式分數產生基準分數，再由神經網路 scoring layer 輸出正式採用的 `silent_risk_score`。
+### 正式沉默風險公式
 
-核心概念：
+批次 pipeline 與即時 pipeline 共用：
 
 ```text
-base_risk_score
-= static risk
-+ sensor gap
-+ realtime event signal
+src/scoring/silent_risk.py
+```
+
+正式排序欄位：
+
+```text
+silent_risk_score
+silent_risk_rule_score
+silent_risk_level
+scoring_mode = rule_based_mvp
+model_status = not_applied 或實驗性狀態
+```
+
+核心計算概念：
+
+```text
+recent_report_score
+= min(report_count_6h / 3, 1)
+
+older_report_score
+= min(max(report_count_24h - report_count_6h, 0) / 6, 1)
+
+report_activity_score
+= 0.70 × recent_report_score
++ 0.30 × older_report_score
 
 silence_factor
-= lower report activity → higher silence factor
+= 1 - report_activity_score
+
+risk_evidence_score
+= 0.55 × static_risk_score
++ 0.20 × sensor_realtime_score
++ 0.25 × realtime_event_score
+
+observation_gap_score
+= sensor_gap_score
 
 silent_risk_score
-= high risk × low report activity
+= risk_evidence_score
+× (0.50 + 0.50 × observation_gap_score)
+× silence_factor
 ```
 
-白話來說：
+解讀原則：
 
-- 風險高，但最近沒有通報 → 沉默風險上升。
-- 風險高，但已有通報 → 沉默風險下降。
-- 風險低，即使沒有通報 → 不會被誤判為沉默災區。
+- 風險證據高、觀測缺口高、近時通報少：沉默風險上升。
+- 已有 verified 通報：沉默因子降低，代表該區不再是「完全沉默」。
+- 這不代表已通報區域不重要，因此系統額外建立已驗證事件隊列。
+
+### 隊列 A：`silent_watch_queue`
+
+此隊列來自 `silent_risk_score`，主要回答：
+
+> 哪些區域可能因為低觀測與低通報而需要主動確認？
+
+優先等級：
+
+| 等級 | 規則 |
+|---|---|
+| `P1` | `silent_risk_score >= 0.55` |
+| `P2` | `0.35 <= silent_risk_score < 0.55` |
+| `P3` | `silent_risk_score < 0.35` |
+
+### 隊列 B：`verified_incident_queue`
+
+此隊列來自人工審核為 `verified` 的通報，主要回答：
+
+> 哪些區域已有可信事件資訊，需要進一步人員研判？
+
+優先等級：
+
+| 等級 | 判定概念 |
+|---|---|
+| `I1` | 受困人員類型，或嚴重程度 3 |
+| `I2` | 嚴重程度 2，或積淹水、土石／落石、道路中斷等事件 |
+| `I3` | 其他已驗證、但相對低優先的事件 |
 
 ---
 
-## 9. AI Scoring Layer
+## LINE 民眾回報流程
 
-MVP 階段使用規則式分數產生 pseudo-label，訓練 `MLPRegressor` 神經網路模型，驗證 scoring layer 可替換架構。
+### 使用者流程
 
-目前模型不是使用真實災害 ground truth 訓練，因此不能宣稱能準確預測真實災情。
+```text
+使用者輸入「災情回報」
+        ↓
+選擇災情類型
+        ↓
+選擇嚴重程度（1 / 2 / 3）
+        ↓
+傳送 LINE 位置
+        ↓
+輸入文字描述
+        ↓
+確認送出
+        ↓
+建立 status = pending 的通報
+        ↓
+管理者審核為 verified 或 rejected
+```
 
-正式版可使用以下資料重新訓練：
+支援類型：
 
-- 歷史災情紀錄
-- 巡查結果
-- 通報延遲資料
-- 救災派遣紀錄
-- 專家標註的高優先巡查區
+| 代碼 | 類型 |
+|---|---|
+| `flooding` | 積淹水 |
+| `landslide` | 土石／落石 |
+| `road_blocked` | 道路中斷 |
+| `trapped_people` | 受困／需協助 |
+| `power_or_comms` | 停電／通訊異常 |
+| `other` | 其他 |
 
-模型相關文件：
+### 通報資料生命週期
 
-- [Model Card](docs/model.md)
-- `models/silent_risk_mlp_metadata.json`
+```text
+LINE / manual / API
+        ↓
+pending
+        ├── verified → 可進入 live report features 與 incident queue
+        └── rejected → 保留審核記錄，但不納入正式分析
+```
+
+### 隱私設計
+
+- LINE user ID 先以 `REPORTER_HASH_SECRET` 做 HMAC 雜湊。
+- `data/reports/` 預設不提交至 Git。
+- 不建議要求使用者回報身分證號、電話、完整住址等敏感個資。
+- 線上正式部署前，應建立資料保存期間、管理者權限與個資告知機制。
 
 ---
 
-## 10. Environment
+## 資料模式與輸出可信度
 
-This MVP was developed and tested with:
+所有主要風險 API 會回傳 `meta`，用來揭露資料狀態。
 
-- Python: **3.12.10**
-- API framework: FastAPI
-- Runtime server: Uvicorn
-- Main geospatial libraries: GeoPandas, Shapely, PyProj
-- Machine learning: scikit-learn MLPRegressor
+| 欄位 | 說明 |
+|---|---|
+| `data_mode` | `live`、`batch`、`sample` 或 `unverified` |
+| `verification` | 是否由完成的 manifest 驗證 |
+| `pipeline_status` | pipeline 的目前狀態 |
+| `run_id` | 當輪資料處理識別碼 |
+| `generated_at` | 產出生成時間 |
+| `generated_age_seconds` | 資料年齡（秒） |
+| `freshness` | `fresh`、`stale`、`expired`、`not_realtime`、`sample_data` 或 `unknown` |
+| `source_status` | 即時資料來源抓取狀態 |
+| `has_source_issues` | 是否存在抓取失敗或略過的來源 |
+| `scoring_mode` | 正式計分模式 |
+| `model_status` | 神經網路層的應用狀態 |
 
-Recommended setup differs by operating system.
+### 資料模式解讀
+
+| 模式 | 意義 | 使用建議 |
+|---|---|---|
+| `live` | 同一輪即時資料 pipeline 已完成 | 可作為人工確認優先順序參考 |
+| `batch` | 完整批次 pipeline 產出 | 不應宣稱為即時資料 |
+| `sample` | Repository 內建展示資料 | 僅供 API / UI demo |
+| `unverified` | 找到輸出檔，但缺乏可信 manifest | 需先人工檢查 |
+
+---
+
+## 環境需求與安裝
+
+### 建議環境
+
+- Python **3.12**
+- FastAPI + Uvicorn
+- GeoPandas、Shapely、PyProj
+- pandas、NumPy、scikit-learn
+- SQLite（Python 內建）
+- 可選：Ollama（本地 AI 摘要）
 
 ### macOS / Linux
 
 ```bash
-python3 --version
-# Python 3.12.10
+git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
+cd silent-disaster-zone-api
 
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
+
+cp .env.example .env
 ```
 
 ### Windows PowerShell
 
 ```powershell
-py -3.12 --version
-# Python 3.12.10
+git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
+cd silent-disaster-zone-api
 
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+
+Copy-Item .env.example .env
 ```
 
-If PowerShell blocks virtual environment activation, run this in the same PowerShell window and try again:
+PowerShell 若阻擋 virtual environment 啟用：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -260,360 +349,485 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ---
 
-## 11. Installation
+## 環境變數設定
 
-### macOS / Linux
+請由 `.env.example` 複製為 `.env` 後設定。**不可提交 `.env`。**
 
-```bash
-git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
-cd silent-disaster-zone-api
+| 變數 | 必填 | 用途 |
+|---|---:|---|
+| `CWA_API_KEY` | 即時資料流程需要 | 中央氣象署資料 API Key |
+| `ENV` | 否 | 執行環境標記，預設可設為 `development` |
+| `OLLAMA_BASE_URL` | 否 | Ollama URL，預設 `http://127.0.0.1:11434` |
+| `OLLAMA_MODEL` | 否 | Ollama 模型名稱，例如 `qwen2.5:7b` |
+| `REPORT_ADMIN_KEY` | 管理 API 需要 | 高權限管理操作的固定第二層金鑰 |
+| `REPORTER_HASH_SECRET` | LINE 回報需要 | 雜湊 LINE user ID 的私密 Key |
+| `LINE_CHANNEL_SECRET` | LINE webhook 需要 | 驗證 LINE webhook 簽章 |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE 回覆需要 | 呼叫 LINE Reply API 的 Access Token |
+| `AUTH_LOGIN_USERNAME` | 登入 API 需要 | API 登入帳號 |
+| `AUTH_LOGIN_PASSWORD_HASH` | 登入 API 需要 | PBKDF2 雜湊後的登入密碼 |
+| `AUTH_STORAGE_SECRET` | 登入 API 需要 | 雜湊 access token 與來源 IP 的私密 Key |
+| `AUTH_TRUST_PROXY_HEADERS` | 否 | 僅在可信任 reverse proxy 前設定為 `true` |
+| `AUTH_DB_PATH` | 否 | 自訂登入 Session SQLite 路徑 |
+| `REPORT_DB_PATH` | 否 | 自訂通報 SQLite 路徑 |
 
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-```
+### 產生登入密碼 Hash 與 Storage Secret
 
-### Windows PowerShell
-
-```powershell
-git clone https://github.com/cloud-driver/silent-disaster-zone-api.git
-cd silent-disaster-zone-api
-
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-Create `.env` from `.env.example`:
-
-macOS / Linux:
+以下指令不會把明碼密碼寫進終端紀錄：
 
 ```bash
-cp .env.example .env
+python3 - <<'PY'
+import secrets
+from getpass import getpass
+
+from src.auth.store import hash_password
+
+password = getpass("設定 API 登入密碼：")
+confirm = getpass("再次輸入密碼：")
+
+if password != confirm:
+    raise SystemExit("兩次密碼不同，已取消。")
+
+print()
+print("AUTH_LOGIN_PASSWORD_HASH=" + hash_password(password))
+print("AUTH_STORAGE_SECRET=" + secrets.token_urlsafe(48))
+PY
 ```
 
-Windows PowerShell:
+將輸出的兩行，以及帳號設定寫入 `.env`：
 
-```powershell
-Copy-Item .env.example .env
+```env
+AUTH_LOGIN_USERNAME=api-admin
+AUTH_LOGIN_PASSWORD_HASH=貼上上一步產生的完整雜湊
+AUTH_STORAGE_SECRET=貼上上一步產生的完整隨機字串
 ```
 
-Then fill in your own API key:
+### 產生 Report Admin 與 LINE 雜湊 Secret
 
 ```bash
-CWA_API_KEY=your_cwa_api_key_here
+python3 - <<'PY'
+import secrets
+
+print("REPORT_ADMIN_KEY=" + secrets.token_urlsafe(32))
+print("REPORTER_HASH_SECRET=" + secrets.token_urlsafe(32))
+PY
 ```
 
-Do not commit `.env`.
+> `AUTH_TRUST_PROXY_HEADERS=true` 僅適用於 Uvicorn 綁定 localhost，且前方確實由你信任的 Caddy / Nginx 代理時。若直接公開 Uvicorn，不應信任外部客戶端傳入的 `X-Forwarded-For`。
 
 ---
 
-## 12. Quick Demo Without Raw Data
+## 啟動 API 與 Swagger Portal
 
-This repository does not commit raw government datasets or generated runtime outputs.
-
-For quick review, the API automatically falls back to files in `sample_outputs/` when `outputs/latest/` does not exist.
-
-After cloning the repository, reviewers can run:
-
-macOS / Linux:
+啟動開發伺服器：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-uvicorn src.api.main:app --reload
+python -m uvicorn src.api.main:app --reload
 ```
 
-Windows PowerShell:
+固定監聽本機：
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-uvicorn src.api.main:app --reload
+```bash
+python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Then open:
+文件入口：
 
 ```text
-http://127.0.0.1:8000/docs
+Swagger API Portal: http://127.0.0.1:8000/docs
+ReDoc Reference:    http://127.0.0.1:8000/redoc
+OpenAPI JSON:       http://127.0.0.1:8000/openapi.json
 ```
 
-Useful demo endpoints:
+Swagger Portal 提供：
+
+- API 分組與編號，例如 `【10-1】`、`【20-2】`。
+- 每個輸入欄位的傳遞位置、必填性、預設值、說明與範例。
+- Bearer Token 與 `REPORT_ADMIN_KEY` 的 Authorize 介面。
+- 可搜尋、可 Try it out、可檢視回應時間。
+
+---
+
+## 登入與 API 驗證
+
+### 公開路由
+
+下列路由不需要 Bearer Token：
 
 ```text
-GET /health
-GET /silent-risk/top?limit=5
-GET /silent-risk/10015020001
-GET /silent-risk.geojson
+POST /auth/login
+GET  /health
+GET  /advisor/health
+GET  /line/health
+POST /line/webhook
+GET  /docs
+GET  /redoc
+GET  /openapi.json
 ```
 
-Expected fallback behavior:
+說明：
 
-```json
-{
-  "active_json_path": "sample_outputs/silent_risk_sample.json",
-  "active_geojson_path": "sample_outputs/silent_risk_sample.geojson"
-}
+- `/auth/login`：登入入口，同 IP 在滑動 60 秒內最多 5 次。
+- `/line/webhook`：不使用 Bearer Token，改用 LINE `X-Line-Signature` 驗證。
+- `/health`、`/advisor/health`、`/line/health`：供健康檢查使用。
+
+### Bearer Token
+
+除公開路由外，所有 API 都必須帶：
+
+```http
+Authorization: Bearer <access_token>
 ```
 
----
+Token 的特性：
 
-## 13. Run API
+- 每次成功登入產生唯一 token。
+- 固定有效 **900 秒（15 分鐘）**。
+- 每次 API 使用不會延長到期時間。
+- `/auth/logout` 後立即失效。
+- 伺服器只保存 token 的雜湊值，不保存原始 token。
 
-```bash
-uvicorn src.api.main:app --reload
-```
+### `REPORT_ADMIN_KEY` 的第二層保護
 
-Open:
+以下高權限 API 需要：
+
+1. Bearer Token
+2. `X-Admin-Key: <REPORT_ADMIN_KEY>`
 
 ```text
-http://127.0.0.1:8000/docs
+GET  /reports/pending
+POST /reports/{report_id}/review
+GET  /incidents/verified
+GET  /advisor/command
+POST /pipeline/run
 ```
 
-Useful endpoints:
+> `/advisor/command` 目前在程式實作中也要求 `REPORT_ADMIN_KEY`，因為它可讀取已驗證事件與產生決策支援結果。
+
+### 登入範例
+
+```bash
+curl -s \
+  -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "api-admin",
+    "password": "你的登入密碼"
+  }' \
+  | python3 -m json.tool --no-ensure-ascii
+```
+
+取得 token：
+
+```bash
+TOKEN=$(
+  curl -s \
+    -X POST http://127.0.0.1:8000/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{
+      "username": "api-admin",
+      "password": "你的登入密碼"
+    }' \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)
+```
+
+使用一般 API：
+
+```bash
+curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8000/silent-risk/top?limit=5" \
+  | python3 -m json.tool --no-ensure-ascii
+```
+
+使用管理 API：
+
+```bash
+curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Admin-Key: 你的REPORT_ADMIN_KEY" \
+  "http://127.0.0.1:8000/reports/pending?limit=20" \
+  | python3 -m json.tool --no-ensure-ascii
+```
+
+Swagger 使用方式：
 
 ```text
-GET /health
-GET /model/info
-GET /silent-risk/top?limit=5
-GET /silent-risk/top?limit=5&refresh=true
-GET /silent-risk/{village_id}
-GET /silent-risk.geojson
+1. 使用【01-1】登入並取得 15 分鐘 Token。
+2. 複製 access_token 原始內容。
+3. 點 Swagger 右上角 Authorize。
+4. 在 BearerAccessToken 貼上 token 本體，不要自行加 Bearer。
+5. 欲使用管理 API 時，再填入 ReportAdminKey。
 ```
 
 ---
 
-## 14. API Endpoints
+## API 總覽
 
-> Windows note: In PowerShell, use `curl.exe` instead of `curl` if `curl` is aliased to `Invoke-WebRequest`. You can also open the URLs directly in a browser.
+> 所有欄位、必填性、預設值與 request / response 範例請以 Swagger Portal 為準。
 
+| 編號 | Method | Path | Bearer Token | `REPORT_ADMIN_KEY` | 說明 |
+|---|---|---|---:|---:|---|
+| `00-1` | GET | `/` | 是 | 否 | API 入口資訊 |
+| `00-2` | GET | `/health` | 否 | 否 | 系統與資料健康狀態 |
+| `00-3` | GET | `/model/info` | 是 | 否 | 實驗模型 metadata |
+| `01-1` | POST | `/auth/login` | 否 | 否 | 登入並取得 15 分鐘 Token；同 IP 每分鐘最多 5 次 |
+| `01-2` | GET | `/auth/session` | 是 | 否 | 查詢目前 Token 狀態 |
+| `01-3` | POST | `/auth/logout` | 是 | 否 | 撤銷目前 Token |
+| `10-1` | GET | `/silent-risk` | 是 | 否 | 查詢沉默風險清單 |
+| `10-2` | GET | `/silent-risk/top` | 是 | 否 | 取得沉默風險最高村里 |
+| `10-3` | GET | `/silent-risk/{village_id}` | 是 | 否 | 查詢單一村里 |
+| `10-4` | GET | `/silent-risk.geojson` | 是 | 否 | 取得地圖 GeoJSON |
+| `20-1` | GET | `/advisor/health` | 否 | 否 | 檢查 Ollama advisor |
+| `20-2` | GET | `/advisor/command` | 是 | 是 | 取得雙隊列指揮建議 |
+| `30-1` | GET | `/reports/summary` | 是 | 否 | 民眾回報統計 |
+| `30-2` | GET | `/reports/pending` | 是 | 是 | 取得待審核回報 |
+| `30-3` | POST | `/reports/{report_id}/review` | 是 | 是 | 審核回報為 verified / rejected |
+| `40-1` | GET | `/incidents/verified` | 是 | 是 | 取得已驗證事件 snapshot |
+| `50-1` | GET | `/line/health` | 否 | 否 | 檢查 LINE 設定狀態 |
+| `50-2` | POST | `/line/webhook` | 否 | 否 | LINE 平台 webhook，使用簽章驗證 |
+| `90-1` | POST | `/pipeline/run` | 是 | 是 | 執行完整 batch pipeline |
 
-### `GET /health`
+### 常見回應狀態碼
 
-Check API and output availability.
-
-Example:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-### `GET /model/info`
-
-Return neural network model metadata.
-
-Example:
-
-```bash
-curl http://127.0.0.1:8000/model/info
-```
-
-### `GET /silent-risk/top`
-
-Return top silent-risk villages.
-
-Example:
-
-```bash
-curl "http://127.0.0.1:8000/silent-risk/top?limit=5"
-```
-
-### `GET /silent-risk/top?refresh=true`
-
-Fetch realtime data, normalize features, recompute risk, apply NN scoring, and return top results.
-
-This requires local data artifacts and a trained model. It is intended for development/demo environments after the preprocessing pipeline has been prepared.
-
-Example:
-
-```bash
-curl "http://127.0.0.1:8000/silent-risk/top?limit=5&refresh=true"
-```
-
-### `GET /silent-risk/{village_id}`
-
-Return one village by `village_id`.
-
-Example:
-
-```bash
-curl http://127.0.0.1:8000/silent-risk/10015020001
-```
-
-### `GET /silent-risk.geojson`
-
-Return GeoJSON layer for map display.
-
-Example:
-
-```bash
-curl http://127.0.0.1:8000/silent-risk.geojson
-```
+| 狀態碼 | 意義 |
+|---:|---|
+| `200` | 請求成功 |
+| `401` | 缺少、無效、過期或已撤銷的 Bearer Token |
+| `403` | `REPORT_ADMIN_KEY` 缺失或無效 |
+| `404` | 找不到資源、輸出檔或事件 snapshot |
+| `409` | 狀態衝突，例如重複審核非 `pending` 通報 |
+| `422` | 請求欄位或參數格式錯誤 |
+| `429` | `/auth/login` 在同 IP 的 60 秒內超過 5 次 |
+| `500` | 伺服器處理或 pipeline 執行失敗 |
+| `503` | 必要環境變數尚未設定 |
 
 ---
 
-## 15. Client Sample
+## 即時資料流程
 
-### Python client example
-
-```python
-import requests
-
-base_url = "http://127.0.0.1:8000"
-
-response = requests.get(f"{base_url}/silent-risk/top", params={"limit": 5})
-response.raise_for_status()
-
-data = response.json()
-
-for row in data["data"]:
-    print(
-        row["county_name"],
-        row["town_name"],
-        row["village_name"],
-        row["silent_risk_score"],
-        row["silent_risk_level"],
-    )
-```
-
----
-
-## 16. Run Realtime Pipeline
-
-Full realtime scoring requires local static/processed data artifacts.
-
-macOS / Linux:
+### 單次 realtime pipeline
 
 ```bash
-python3 scripts/fetch_realtime_sources.py
-python3 scripts/normalize_realtime_sources.py
-python3 scripts/compute_silent_risk_realtime.py
-python3 scripts/apply_silent_risk_nn.py
-```
-
-Windows PowerShell:
-
-```powershell
 python scripts/fetch_realtime_sources.py
 python scripts/normalize_realtime_sources.py
+python scripts/build_verified_report_features.py
 python scripts/compute_silent_risk_realtime.py
 python scripts/apply_silent_risk_nn.py
 ```
 
-Outputs will be written to:
+流程意義：
+
+| 步驟 | 功能 |
+|---|---|
+| `fetch_realtime_sources.py` | 抓取即時外部資料並保存 raw snapshots |
+| `normalize_realtime_sources.py` | 依同一 `run_id` 正規化雨量、警戒與路況特徵 |
+| `build_verified_report_features.py` | 將已驗證通報空間對應至村里，產生 6h / 24h 通報特徵與事件 snapshot |
+| `compute_silent_risk_realtime.py` | 合併資料並使用共享規則式公式計算沉默風險 |
+| `apply_silent_risk_nn.py` | 套用實驗性 NN 層；不改變正式 rule-based 排序 |
+
+輸出位置：
 
 ```text
 outputs/latest/silent_risk.json
 outputs/latest/silent_risk.csv
 outputs/latest/silent_risk.geojson
-```
+outputs/latest/verified_incidents.json
+outputs/latest/run_manifest.json
 
-Historical outputs are written to:
-
-```text
 outputs/history/{run_id}/
 ```
 
-### Full Pipeline Reproduction with Raw Data
+### 關於 `refresh=true`
 
-This repository does not commit raw government datasets directly. To reproduce the full pipeline, download `raw_data_minimal.zip` from the GitHub Release page and unzip it into the project root.
-
-Expected structure:
+下列 API 帶 `refresh=true` 時會同步執行 realtime pipeline：
 
 ```text
-data/raw/village_boundary/
-data/raw/population/
-data/raw/flood_potential/
-data/raw/debris_flow/
-data/raw/sensors/
-data/raw/reports/
+GET /silent-risk?refresh=true
+GET /silent-risk/top?refresh=true
+GET /advisor/command?refresh=true
 ```
 
-Then run:
+這是阻塞式操作，可能耗時且會依賴外部資料來源、靜態資料與本機環境。建議：
 
-```bash
-python3 scripts/run_pipeline.py
-```
-
-On Windows PowerShell:
-
-```powershell
-py -3.12 scripts/run_pipeline.py
-```
-
-The full pipeline will regenerate processed features and output files from the raw datasets.
+- 在開發／展示環境使用。
+- 在正式環境改由排程或受保護的背景工作執行。
+- 不要讓不受信任的使用者頻繁呼叫。
+- 請先確認資料模式與 `run_manifest.json`。
 
 ---
 
-## 17. Reproducing the Neural Network Scoring Layer
+## 批次流程與 sample demo
 
-Before running the API with NN scoring, train the model once:
+### Sample output demo
 
-macOS / Linux:
-
-```bash
-python3 scripts/train_silent_risk_nn.py
-```
-
-Windows PowerShell:
-
-```powershell
-python scripts/train_silent_risk_nn.py
-```
-
-Then run realtime scoring:
-
-macOS / Linux:
+Repository 內建 `sample_outputs/`，當 `outputs/latest/` 不存在時，API 會使用 sample output 作為可展示資料。
 
 ```bash
-python3 scripts/fetch_realtime_sources.py
-python3 scripts/normalize_realtime_sources.py
-python3 scripts/compute_silent_risk_realtime.py
-python3 scripts/apply_silent_risk_nn.py
+python -m uvicorn src.api.main:app --reload
 ```
 
-Windows PowerShell:
+可先查看不需登入的健康狀態：
 
-```powershell
-python scripts/fetch_realtime_sources.py
-python scripts/normalize_realtime_sources.py
-python scripts/compute_silent_risk_realtime.py
-python scripts/apply_silent_risk_nn.py
+```bash
+curl -s http://127.0.0.1:8000/health \
+  | python3 -m json.tool --no-ensure-ascii
 ```
 
-The API `refresh=true` mode will run the realtime refresh pipeline and apply the NN scoring layer if the trained model exists.
+登入後再查看 sample 資料：
+
+```bash
+curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:8000/silent-risk/top?limit=5" \
+  | python3 -m json.tool --no-ensure-ascii
+```
+
+若 `meta.data_mode` 是 `sample`，結果只供 API 展示與介面驗證，不得當作即時災害資料。
+
+### 完整 batch pipeline
+
+完整 batch pipeline 需要預先準備本機 raw / processed 資料。原始資料與生成物不提交到 Repository。
+
+```bash
+python scripts/run_pipeline.py
+```
+
+完成後會產生 batch manifest，API metadata 會標記：
+
+```text
+data_mode = batch
+freshness = not_realtime
+```
 
 ---
 
-## 18. Example Output
+## 測試
 
-See:
+執行所有單元測試：
 
-```text
-sample_outputs/silent_risk_sample.json
-sample_outputs/silent_risk_sample.csv
-sample_outputs/silent_risk_sample.geojson
+```bash
+python -m unittest discover -s tests -v
 ```
 
-Example fields:
+目前測試涵蓋：
+
+- 沉默風險正式計分邏輯。
+- 近 6 / 24 小時通報數一致性。
+- 感測器缺口對排序的獨立影響。
+- 必要欄位遺漏時的明確錯誤。
+- LINE webhook 簽章驗證。
+- LINE 災情回報的完整 session 流程。
+- webhook event 去重。
+- `pending → verified` 審核流程。
+- verified report 的村里空間對應與 6h / 24h 特徵。
+- verified incident queue 的 I1 / I2 / I3 排序。
+- Swagger API 編號、輸入欄位說明、預設值與安全機制。
+- 15 分鐘 Bearer Token、登出撤銷與登入速率限制。
+
+靜態檢查：
+
+```bash
+python -m py_compile \
+  src/api/main.py \
+  src/api/docs.py \
+  src/api/auth.py \
+  src/auth/store.py \
+  src/auth/middleware.py
+```
+
+---
+
+## 輸出格式
+
+### `silent_risk.json`
+
+簡化範例：
+
+```json
+[
+  {
+    "village_id": "10015020001",
+    "county_name": "花蓮縣",
+    "town_name": "鳳林鎮",
+    "village_name": "鳳仁里",
+    "static_risk_score": 0.61,
+    "sensor_gap_score": 0.61,
+    "realtime_event_score": 0.0,
+    "report_count_6h": 0,
+    "report_count_24h": 0,
+    "risk_evidence_score": 0.34,
+    "observation_gap_score": 0.61,
+    "report_activity_score": 0.0,
+    "silence_factor": 1.0,
+    "silent_risk_score": 0.27,
+    "silent_risk_level": "low",
+    "scoring_mode": "rule_based_mvp",
+    "model_status": "not_applied"
+  }
+]
+```
+
+### `verified_incidents.json`
+
+簡化範例：
 
 ```json
 {
-  "village_id": "10015020001",
-  "county_name": "花蓮縣",
-  "town_name": "鳳林鎮",
-  "village_name": "鳳仁里",
-  "silent_risk_score": 0.392821,
-  "silent_risk_level": "medium",
-  "silent_reason": "靜態災害風險偏高；感測器覆蓋缺口偏高；近6小時無通報；近24小時無通報"
+  "schema_version": "1.0",
+  "run_id": "realtime_20260625_120000",
+  "generated_at": "2026-06-25T12:00:00+08:00",
+  "data_mode": "live",
+  "report_data_source": "verified_human_reviewed_reports",
+  "summary": {
+    "verified_report_total": 3,
+    "eligible_recent_report_count": 2,
+    "matched_report_count": 2
+  },
+  "count": 2,
+  "data": [
+    {
+      "incident_id": "RPT-AB12CD34EF56",
+      "incident_priority": "I2",
+      "village_id": "10015020001",
+      "village_label": "花蓮縣鳳林鎮鳳仁里",
+      "category": "flooding",
+      "category_label": "積淹水",
+      "severity": 2,
+      "needs_human_confirmation": true
+    }
+  ]
 }
 ```
 
 ---
 
-## 19. Project Structure
+## 神經網路實驗層
+
+專案保留 `silent_risk_nn_score` 與相關訓練腳本，用於驗證 scoring layer 可替換架構。
+
+但目前模型以 pseudo-label 為基礎，不是使用真實災害 ground truth，因此：
+
+- 不得宣稱模型可準確預測災害。
+- 不得以 NN 分數取代正式 rule-based 排序。
+- `silent_risk_nn_score` 應視為研究與架構驗證用途。
+
+未來可使用以下資料重訓：
+
+- 歷史災情紀錄
+- 巡查結果與現地確認紀錄
+- 通報延遲資料
+- 救災派遣與處置資料
+- 專家標註的優先確認區域
+
+相關文件：
+
+- `docs/model.md`
+- `models/silent_risk_mlp_metadata.json`
+
+---
+
+## 專案結構
 
 ```text
 silent-disaster-zone-api/
@@ -625,299 +839,113 @@ silent-disaster-zone-api/
 │   ├── model.md
 │   ├── submission.md
 │   └── schemas/
-├── sample_data/
 ├── sample_outputs/
 ├── scripts/
+│   ├── fetch_realtime_sources.py
+│   ├── normalize_realtime_sources.py
+│   ├── build_verified_report_features.py
+│   ├── compute_silent_risk_realtime.py
+│   ├── apply_silent_risk_nn.py
+│   └── run_pipeline.py
 ├── src/
+│   ├── advisor/
+│   │   ├── command_advisor.py
+│   │   ├── command_plan.py
+│   │   └── incident_plan.py
 │   ├── api/
-│   └── realtime/
-└── models/
-    └── silent_risk_mlp_metadata.json
+│   │   ├── auth.py
+│   │   ├── docs.py
+│   │   ├── incidents.py
+│   │   ├── line_webhook.py
+│   │   ├── main.py
+│   │   └── reports.py
+│   ├── auth/
+│   │   ├── middleware.py
+│   │   └── store.py
+│   ├── line_bot/
+│   │   ├── client.py
+│   │   ├── flow.py
+│   │   └── store.py
+│   ├── reports/
+│   │   ├── analytics.py
+│   │   └── store.py
+│   ├── runtime/
+│   └── scoring/
+├── tests/
+├── models/
+└── data/
+    ├── auth/       # ignored
+    ├── reports/    # ignored
+    ├── raw/        # ignored
+    ├── processed/  # ignored
+    └── realtime/   # ignored
 ```
 
 ---
 
-## 20. Raw Data and Generated Artifacts Policy
+## 資料與隱私政策
 
-This repository does not commit large raw datasets or generated runtime outputs.
-
-Ignored paths include:
+預設不提交以下資料：
 
 ```text
+.env
+data/auth/
+data/reports/
 data/raw/
 data/interim/
 data/processed/
 data/realtime/
 outputs/
 models/*.joblib
-.env
 ```
 
-Reasons:
+原因：
 
-- raw government datasets may be large,
-- realtime API snapshots should be regenerated,
-- generated outputs should be reproducible,
-- API keys must not be committed,
-- model binary artifacts can be retrained from scripts.
-
-For quick review, the API falls back to `sample_outputs/` when `outputs/latest/` is not available.
-
-The neural network model metadata is committed, but the `.joblib` model artifact is ignored. To regenerate the model, run:
-
-macOS / Linux:
-
-```bash
-python3 scripts/train_silent_risk_nn.py
-```
-
-Windows PowerShell:
-
-```powershell
-python scripts/train_silent_risk_nn.py
-```
+- API Key、登入 Hash、Storage Secret 與管理金鑰不得公開。
+- LINE 回報可能包含位置、文字描述與事件資訊。
+- 原始政府資料可能很大，也可能需依授權或更新週期重新取得。
+- 即時 snapshots 與輸出應可由 pipeline 重新生成。
+- 模型 binary 檔應由訓練流程重新建立。
 
 ---
 
-## 21. Documentation
+## 限制與後續方向
 
-Additional documentation:
+### 現階段限制
 
-- [API Documentation](docs/api.md)
-- [Model Card](docs/model.md)
-- [Submission Description](docs/submission.md)
-- [Silent Risk JSON Schema](docs/schemas/silent_risk.schema.json)
-- [Report Input JSON Schema](docs/schemas/report_input.schema.json)
+- MVP 範圍為花蓮縣村里層級。
+- 即時資料可用性受外部 API 與網路狀態影響。
+- LINE webhook 要真正接收外部使用者訊息，仍需要公開 HTTPS 網域與 LINE Developers Console 設定。
+- `refresh=true` 為同步阻塞式流程，正式部署建議改為排程或背景工作。
+- 機器學習層尚未使用真實 ground truth，不可宣稱預測準確性。
+- 路況事件仍以規則式特徵為主，後續可細化事件分類與空間影響範圍。
+- 水利署水位資料尚未完成整合。
 
----
+### 建議後續工作
 
-## 22. Reviewer Note
-
-The repository includes sample outputs so the API can be reviewed without downloading large raw datasets. If `outputs/latest/` is not available, the API automatically falls back to `sample_outputs/`.
-
-The full realtime refresh pipeline requires local raw/processed data artifacts and API credentials. The sample-output mode is provided so reviewers can immediately inspect the API behavior and output format.
-
----
-
-## 23. Limitations
-
-- 通報資料目前為 mock data。
-- 神經網路目前使用 pseudo-label，不是真實災害標籤。
-- 即時 API 可能受外部服務可用性影響。
-- WRA 水利署水位資料尚未完成串接。
-- 路況事件分數目前為關鍵字規則，仍需進一步細分事件嚴重程度。
-- 本元件提供優先關注清單，不直接等同實際災情判定。
-- Repository 不包含大型 raw data；完整重跑 pipeline 需要依資料來源重新準備資料。
+1. 將 realtime pipeline 改為受保護的背景 job 與排程。
+2. 部署至 Linux 伺服器，使用 Caddy / Nginx 提供公開 HTTPS。
+3. 設定 LINE webhook URL 並建立正式測試帳號。
+4. 補上 Docker、版本鎖定與 CI。
+5. 將 API response 全面改成嚴格 Pydantic schema。
+6. 建立地圖前端與管理者審核介面。
+7. 使用歷史災情與巡查結果重新訓練模型。
+8. 加入更多可靠的水文、交通與通訊觀測資料。
 
 ---
 
-## 24. Project Status
+## 評審快速檢視建議
 
-Current status: MVP completed.
-
-The project can currently:
-
-- fetch realtime data,
-- preserve raw snapshots,
-- generate realtime village-level features,
-- compute silent risk scores,
-- output JSON / CSV / GeoJSON,
-- serve results through FastAPI.
+1. 先開啟 `/docs`，查看完整 API Portal。
+2. 呼叫 `/health`，確認目前資料模式與輸出狀態。
+3. 使用 `/auth/login` 取得短效 Token。
+4. 呼叫 `/silent-risk/top?limit=5`，查看沉默風險候選。
+5. 查看 `/advisor/command` 的 `priority_queue` 與 `verified_incident_queue`。
+6. 若有 LINE / manual 通報，透過 `/reports/pending` 審核後再執行 realtime pipeline。
+7. 檢查 `meta`、`run_manifest.json` 與 `verified_incidents.json`，確認資料時間與來源狀態。
 
 ---
 
-## 25. Roadmap
+## License
 
-Planned improvements:
-
-- 串接 WRA 水利署水位資料。
-- 串接真實災情通報系統。
-- 將路況事件分數從關鍵字規則改為更細緻的事件分類。
-- 使用歷史災情與巡查結果重新訓練 AI scoring layer。
-- 加入 Docker 部署設定。
-- 加入前端地圖 demo。
-
----
-
-## 26. Optional Extension: Ollama Command Advisor
-
-This project can be extended with a local Ollama-based command advisor layer.
-
-The advisor layer is **not** responsible for deciding whether a place is actually in disaster or issuing official evacuation orders. Its role is to convert the API output into a concise, human-readable command briefing for discussion, triage, and follow-up checks.
-
-Recommended positioning:
-
-```text
-silent_risk_score = model output
-Ollama advisor = command suggestion / briefing generator
-human commander = final decision maker
-```
-
-### Why use Ollama here?
-
-Ollama can run a local LLM on a developer machine or internal server. This is useful for disaster-response discussion because the generated advice can be based on local API outputs without sending village-level risk records to an external cloud model.
-
-### Suggested input to the advisor
-
-The advisor should receive structured JSON from the API, for example the response from:
-
-```text
-GET /silent-risk/top?limit=5
-```
-
-Each record may include:
-
-```json
-{
-  "village_id": "10015020001",
-  "county_name": "花蓮縣",
-  "town_name": "鳳林鎮",
-  "village_name": "鳳仁里",
-  "silent_risk_score": 0.392821,
-  "silent_risk_level": "medium",
-  "silent_reason": "靜態災害風險偏高；感測器覆蓋缺口偏高；近6小時無通報；近24小時無通報",
-  "static_risk_score": 0.611599,
-  "sensor_gap_score": 0.611599,
-  "realtime_event_score": 0.0,
-  "report_count_6h": 0,
-  "report_count_24h": 0
-}
-```
-
-### Suggested prompt design
-
-The prompt should force the model to stay inside the data and avoid overclaiming.
-
-```text
-You are a disaster-response command assistant.
-
-Use only the provided JSON records.
-Do not claim that a disaster has definitely occurred.
-Do not issue official evacuation orders.
-Do not invent facts, sensor values, road conditions, or casualty information.
-
-Your task:
-1. Summarize the top priority villages.
-2. Explain why each village needs attention.
-3. Suggest field verification actions.
-4. Suggest communication actions.
-5. Point out data limitations.
-6. Return concise Traditional Chinese output.
-
-Input JSON:
-{silent_risk_records}
-```
-
-### Example output style
-
-```text
-指揮建議摘要：
-
-1. 優先確認：花蓮縣鳳林鎮鳳仁里
-   - 原因：靜態災害風險偏高，且感測器覆蓋不足，近 6/24 小時無通報。
-   - 建議：優先透過村里長、消防分隊或巡查人員確認現地狀況。
-
-2. 次優先確認：花蓮縣玉里鎮啟模里
-   - 原因：風險分數偏高，但目前缺乏通報資料。
-   - 建議：確認道路、通訊與弱勢住戶狀況。
-
-資料限制：
-目前通報資料可能不完整，模型輸出代表優先關注順序，不等同於實際災情判定。
-```
-
-### Local Ollama setup
-
-macOS / Linux:
-
-```bash
-ollama pull qwen2.5:7b
-ollama serve
-```
-
-Windows PowerShell:
-
-```powershell
-ollama pull qwen2.5:7b
-ollama serve
-```
-
-Recommended environment variables:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:7b
-```
-
-### Minimal Python example
-
-```python
-import json
-import os
-import requests
-
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-
-records = [
-    {
-        "county_name": "花蓮縣",
-        "town_name": "鳳林鎮",
-        "village_name": "鳳仁里",
-        "silent_risk_score": 0.392821,
-        "silent_risk_level": "medium",
-        "silent_reason": "靜態災害風險偏高；感測器覆蓋缺口偏高；近6小時無通報；近24小時無通報"
-    }
-]
-
-prompt = f"""
-你是防災應變指揮輔助助手。
-
-請只根據以下 JSON 資料產生建議。
-不要宣稱災害已經確定發生。
-不要發布正式撤離命令。
-不要編造資料中沒有的道路、傷亡、感測器或通報資訊。
-
-請輸出：
-1. 優先確認區域
-2. 原因
-3. 建議現地查證動作
-4. 建議通訊聯繫動作
-5. 資料限制
-
-JSON:
-{json.dumps(records, ensure_ascii=False, indent=2)}
-"""
-
-response = requests.post(
-    f"{OLLAMA_BASE_URL}/api/generate",
-    json={
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False
-    },
-    timeout=120,
-)
-
-response.raise_for_status()
-print(response.json()["response"])
-```
-
-### Suggested future API endpoint
-
-A future version can expose this advisor through FastAPI:
-
-```text
-GET /advisor/command?limit=5
-```
-
-Expected behavior:
-
-```text
-1. Read /silent-risk/top records.
-2. Build a constrained prompt.
-3. Call local Ollama.
-4. Return command suggestions with data limitations.
-```
-
-This advisor should remain an **assistive briefing layer**, not an automated decision-maker.
-
+請依 Repository 根目錄的 `LICENSE` 檔案為準。

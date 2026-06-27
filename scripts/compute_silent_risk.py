@@ -1,24 +1,27 @@
 from pathlib import Path
 import json
+import sys
+
 import geopandas as gpd
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
-input_path = Path("data/processed/villages_hualien_with_reports.geojson")
+from src.scoring.silent_risk import apply_silent_risk_scoring
+from src.runtime.run_manifest import write_batch_manifest
 
-output_dir = Path("outputs")
+
+input_path = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "villages_hualien_with_reports.geojson"
+)
+
+output_dir = PROJECT_ROOT / "outputs" / "latest"
 output_geojson_path = output_dir / "silent_risk.geojson"
 output_csv_path = output_dir / "silent_risk.csv"
 output_json_path = output_dir / "silent_risk.json"
-
-
-def assign_level(score):
-    if score >= 0.75:
-        return "critical"
-    if score >= 0.55:
-        return "high"
-    if score >= 0.35:
-        return "medium"
-    return "low"
 
 
 def build_silent_reason(row):
@@ -82,51 +85,17 @@ if missing_columns:
 print("必要欄位都有，可以繼續。")
 
 
-print("\n=== 3. 補齊數值欄位 ===")
+print("\n=== 3. 使用共用公式計算批次沉默風險 ===")
 
-numeric_cols = [
-    "static_risk_score",
-    "sensor_gap_score",
-    "sensor_realtime_score",
-    "report_count_6h",
-    "report_count_24h",
-]
+gdf = apply_silent_risk_scoring(gdf)
 
-for col in numeric_cols:
-    gdf[col] = gdf[col].fillna(0).astype(float)
+# 批次 pipeline 不應假裝是即時資料。
+gdf["realtime_run_id"] = "batch_static"
 
-
-print("\n=== 4. 計算 base_risk_score ===")
-
-gdf["base_risk_score"] = (
-    0.55 * gdf["static_risk_score"]
-    + 0.25 * gdf["sensor_gap_score"]
-    + 0.20 * gdf["sensor_realtime_score"]
-).clip(0, 1)
-
-print("base_risk_score 統計：")
-print(gdf["base_risk_score"].describe())
-
-
-print("\n=== 5. 計算通報活動與沉默係數 ===")
-
-gdf["has_report_6h"] = (gdf["report_count_6h"] > 0).astype(int)
-gdf["has_report_24h"] = (gdf["report_count_24h"] > 0).astype(int)
-
-gdf["report_activity_score"] = (
-    0.7 * gdf["has_report_6h"]
-    + 0.3 * gdf["has_report_24h"]
-).clip(0, 1)
-
-gdf["silence_factor"] = (1 - gdf["report_activity_score"]).clip(0, 1)
-
-gdf["silent_risk_score"] = (
-    gdf["base_risk_score"] * gdf["silence_factor"]
-).clip(0, 1)
-
-gdf["silent_risk_level"] = gdf["silent_risk_score"].apply(assign_level)
-gdf["silent_reason"] = gdf.apply(build_silent_reason, axis=1)
-
+gdf["silent_reason"] = gdf.apply(
+    build_silent_reason,
+    axis=1,
+)
 
 print("report_activity_score 統計：")
 print(gdf["report_activity_score"].describe())
@@ -234,11 +203,20 @@ json_columns = [
     "report_count_6h",
     "report_count_24h",
     "base_risk_score",
-    "report_activity_score",
-    "silence_factor",
     "silent_risk_score",
     "silent_risk_level",
     "silent_reason",
+    "risk_evidence_score",
+    "observation_gap_score",
+    "recent_report_score",
+    "older_report_score",
+    "report_activity_score",
+    "silence_factor",
+    "silent_risk_rule_score",
+    "silent_risk_nn_score",
+    "scoring_mode",
+    "model_status",
+    "realtime_run_id",
 ]
 
 json_df = (
@@ -262,3 +240,19 @@ with open(output_json_path, "w", encoding="utf-8") as f:
 print("完成：", output_geojson_path)
 print("完成：", output_csv_path)
 print("完成：", output_json_path)
+
+write_batch_manifest(
+    outputs={
+        "silent_risk_json": str(
+            output_json_path.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_csv": str(
+            output_csv_path.relative_to(PROJECT_ROOT)
+        ),
+        "silent_risk_geojson": str(
+            output_geojson_path.relative_to(PROJECT_ROOT)
+        ),
+    },
+)
+
+print("完成 manifest：outputs/latest/run_manifest.json")

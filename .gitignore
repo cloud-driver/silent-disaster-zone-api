@@ -25,6 +25,8 @@ data/realtime/raw/
 data/realtime/processed/
 data/realtime/latest/
 data/runs/
+data/reports/
+data/auth/
 
 release_assets/*.zip
 

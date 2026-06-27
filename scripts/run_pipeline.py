@@ -6,6 +6,14 @@ import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+LATEST_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "latest"
+
+EXPECTED_OUTPUTS = [
+    LATEST_OUTPUT_DIR / "silent_risk.json",
+    LATEST_OUTPUT_DIR / "silent_risk.csv",
+    LATEST_OUTPUT_DIR / "silent_risk.geojson",
+]
+
 PIPELINE_STEPS = [
     # 1. 村里界
     "scripts/export_villages_geojson.py",
@@ -84,15 +92,27 @@ def main():
     for step in PIPELINE_STEPS:
         run_step(step)
 
+    missing_outputs = [
+        str(path.relative_to(PROJECT_ROOT))
+        for path in EXPECTED_OUTPUTS
+        if not path.exists()
+    ]
+
+    if missing_outputs:
+        raise RuntimeError(
+            "Pipeline 腳本均已完成，但預期 API 輸出不存在："
+            f"{missing_outputs}"
+        )
+
     elapsed = time.time() - start
 
     print("\n" + "=" * 80)
     print("Pipeline completed successfully.")
     print(f"Total time: {elapsed:.2f}s")
     print("Outputs:")
-    print("- outputs/silent_risk.json")
-    print("- outputs/silent_risk.csv")
-    print("- outputs/silent_risk.geojson")
+    print("- outputs/latest/silent_risk.json")
+    print("- outputs/latest/silent_risk.csv")
+    print("- outputs/latest/silent_risk.geojson")
     print("=" * 80)
 
 

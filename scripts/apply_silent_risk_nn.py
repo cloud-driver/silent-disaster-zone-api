@@ -29,10 +29,7 @@ def assign_level(score):
 def build_nn_reason(row):
     reasons = []
 
-    if row["silent_risk_nn_score"] >= row["silent_risk_rule_score"]:
-        reasons.append("神經網路模型判定沉默風險不低於規則分數")
-    else:
-        reasons.append("神經網路模型判定沉默風險低於規則分數")
+    reasons.append("正式排序採規則式分數；神經網路分數僅供實驗比較")
 
     if row["static_risk_score"] >= 0.35:
         reasons.append("靜態災害風險偏高")
@@ -139,13 +136,19 @@ print("\n=== 3. 神經網路推論 ===")
 pred = model.predict(X)
 pred = np.clip(pred, 0, 1)
 
-# 保留原本規則分數，避免丟失可解釋基準
-gdf["silent_risk_rule_score"] = gdf["silent_risk_score"].fillna(0).astype(float)
+# 規則式分數是目前正式排序依據。
+gdf["silent_risk_rule_score"] = (
+    gdf["silent_risk_score"]
+    .fillna(0)
+    .astype(float)
+)
 
+# NN 只作為實驗性比較，不覆蓋正式分數。
 gdf["silent_risk_nn_score"] = pred.astype(float)
 
-# 第一版先真正替換成神經網路分數
-gdf["silent_risk_score"] = gdf["silent_risk_nn_score"]
+gdf["silent_risk_score"] = gdf["silent_risk_rule_score"]
+gdf["scoring_mode"] = "rule_based_mvp"
+gdf["model_status"] = "experimental_pseudo_label"
 
 gdf["silent_risk_level"] = gdf["silent_risk_score"].apply(assign_level)
 gdf["silent_reason"] = gdf.apply(build_nn_reason, axis=1)
@@ -175,7 +178,9 @@ print(
             "report_count_24h",
             "silent_risk_rule_score",
             "silent_risk_nn_score",
-            "silent_risk_level",
+            "scoring_mode",
+            "model_status",
+            "silent_risk_score",
         ]
     ]
     .sort_values("silent_risk_nn_score", ascending=False)

@@ -1,139 +1,181 @@
-from typing import Any, Dict, List
+from __future__ import annotations
 
-from src.advisor.ollama_client import chat_with_ollama
+import json
+from typing import Any
 
-
-IMPORTANT_FIELDS = [
-    "village_id",
-    "county_name",
-    "town_name",
-    "village_name",
-    "population_total",
-    "elderly_ratio",
-    "static_risk_score",
-    "sensor_gap_score",
-    "sensor_realtime_score",
-    "rainfall_realtime_score",
-    "landslide_realtime_score",
-    "road_realtime_score",
-    "realtime_event_score",
-    "report_count_6h",
-    "report_count_24h",
-    "silent_risk_rule_score",
-    "silent_risk_nn_score",
-    "silent_risk_score",
-    "silent_risk_level",
-    "silent_reason",
-    "realtime_run_id",
-]
+from src.advisor.command_plan import build_command_plan
+from src.advisor.ollama_client import (
+    OllamaError,
+    chat_with_ollama,
+    get_ollama_settings,
+)
 
 
-def safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except Exception:
-        return default
+NARRATIVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "situation_summary": {
+            "type": "string",
+        },
+        "recommended_focus": {
+            "type": "string",
+        },
+        "cautions": {
+            "type": "array",
+            "items": {
+                "type": "string",
+            },
+        },
+    },
+    "required": [
+        "situation_summary",
+        "recommended_focus",
+        "cautions",
+    ],
+    "additionalProperties": False,
+}
 
 
-def select_top_villages(records: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
-    sorted_records = sorted(
-        records,
-        key=lambda row: safe_float(row.get("silent_risk_score")),
-        reverse=True,
-    )
-
-    selected = []
-
-    for row in sorted_records[:limit]:
-        item = {}
-
-        for field in IMPORTANT_FIELDS:
-            item[field] = row.get(field)
-
-        selected.append(item)
-
-    return selected
-
-
-def build_advisor_prompts(selected_villages: List[Dict[str, Any]]) -> Dict[str, str]:
+def build_prompts(
+    command_plan: dict[str, Any],
+) -> tuple[str, str]:
     system_prompt = """
-你是一個「防災指揮建議輔助系統」，不是官方決策者。
+你是防災資訊摘要助手，不是指揮官、政府機關或災害應變中心。
 
-你的任務：
-根據使用者提供的沉默災區風險資料，產生給災害應變中心或地方防災人員參考的行動建議。
+你的工作是依照提供的 command_plan，
+將既有的規則式排序整理成中性、保守、可供人工閱讀的繁體中文 briefing。
 
 嚴格限制：
-1. 只能根據提供的資料推論，不得編造沒有出現在資料中的災情。
-2. 不得宣稱某地已經發生災害，除非資料明確顯示。
-3. 不得發布撤離命令、封路命令或任何官方強制命令。
-4. 可以建議「優先確認」、「派員查證」、「聯繫里長」、「比對通報」、「查看感測器狀態」等低風險行動。
-5. 必須清楚標示資料限制，例如 mock 通報資料、感測器覆蓋不足、即時資料可能延遲。
-6. 回答必須使用繁體中文。
-7. 回答要具體、可執行、不要空泛。
-"""
+1. 不得新增 command_plan 中不存在的村里。
+2. 不得變更 P1、P2、P3 優先順序。
+3. 不得把 P3 描述為緊急處置、指揮命令或立即災害事件。
+4. 不得使用「本指揮部」、「指揮命令」、「下令」、「應立即撤離」等語句。
+5. 不得宣稱災害已發生。
+6. 不得發布撤離、封路、停班停課或其他官方強制命令。
+7. 不得把 pending 民眾回報視為已驗證事實。
+8. 必須清楚反映 operational_posture：
+   - routine_monitoring：日常監測與下一輪確認候選。
+   - heightened_monitoring：提高確認與交叉查證優先度。
+   - priority_verification：優先人工確認與巡查。
+9. 必須輸出符合指定 JSON schema 的 JSON。
+10. verified_incident_queue 是已完成人工查證的民眾回報摘要，
+    必須和 priority_queue 分開描述。
+11. 已驗證回報不等於官方災害宣告，也不得轉換為強制命令。
+12. operational_posture 若為 verified_incident_priority_review，
+    代表需要優先人員研判，不代表自動派遣或官方命令。
+""".strip()
 
-    user_prompt = f"""
-以下是目前沉默災區偵測 API 回傳的高風險村里資料。
+    user_prompt = (
+        "請將以下 command plan 轉成結構化指揮 briefing：\n\n"
+        + json.dumps(
+            command_plan,
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
-資料欄位說明：
-- silent_risk_score：沉默風險分數，越高代表越需要主動確認。
-- silent_risk_level：沉默風險等級。
-- static_risk_score：靜態災害與脆弱度風險。
-- sensor_gap_score：感測器覆蓋缺口。
-- realtime_event_score：即時雨量、土石流、路況事件分數。
-- report_count_6h / report_count_24h：近 6 小時 / 24 小時通報數。
-- silent_reason：系統計算出的主要原因。
+    return system_prompt, user_prompt
 
-請根據資料產生「指揮建議 briefing」。
 
-請用以下格式回答：
+def parse_narrative(
+    content: str,
+) -> dict[str, Any]:
+    payload = json.loads(content)
 
-# 指揮建議摘要
+    if not isinstance(payload, dict):
+        raise ValueError("AI 回應不是 JSON object。")
 
-## 1. 優先關注區域
-列出最需要優先確認的 3～5 個村里，說明原因。
+    situation_summary = payload.get(
+        "situation_summary"
+    )
 
-## 2. 建議立即行動
-列出 5～8 個具體行動，例如聯繫對象、查證項目、資料比對、巡查優先順序。
+    recommended_focus = payload.get(
+        "recommended_focus"
+    )
 
-## 3. 不建議立即升級為災害事件的原因
-說明為什麼目前只能列為「優先確認」，不能直接判定為災害。
+    cautions = payload.get("cautions")
 
-## 4. 資料缺口與下一步
-指出目前資料不足處，並建議補強資料。
+    if not isinstance(situation_summary, str):
+        raise ValueError(
+            "AI 回應缺少 situation_summary。"
+        )
 
-## 5. 給指揮官的一句話
-用一句話總結目前最重要的判斷。
+    if not isinstance(recommended_focus, str):
+        raise ValueError(
+            "AI 回應缺少 recommended_focus。"
+        )
 
-資料如下：
-{selected_villages}
-"""
+    if not isinstance(cautions, list):
+        raise ValueError(
+            "AI 回應缺少 cautions。"
+        )
+
+    cleaned_cautions = [
+        str(item).strip()
+        for item in cautions
+        if str(item).strip()
+    ][:5]
 
     return {
-        "system_prompt": system_prompt.strip(),
-        "user_prompt": user_prompt.strip(),
+        "situation_summary": situation_summary.strip(),
+        "recommended_focus": recommended_focus.strip(),
+        "cautions": cleaned_cautions,
     }
 
 
 def generate_command_advice(
-    records: List[Dict[str, Any]],
+    *,
+    records: list[dict[str, Any]],
+    dataset_metadata: dict[str, Any],
+    report_summary: dict[str, Any],
+    verified_incidents: list[dict[str, Any]] | None = None,
     limit: int = 5,
-) -> Dict[str, Any]:
-    selected_villages = select_top_villages(records, limit=limit)
-
-    prompts = build_advisor_prompts(selected_villages)
-
-    result = chat_with_ollama(
-        system_prompt=prompts["system_prompt"],
-        user_prompt=prompts["user_prompt"],
-        temperature=0.2,
+) -> dict[str, Any]:
+    command_plan = build_command_plan(
+        records=records,
+        dataset_metadata=dataset_metadata,
+        report_summary=report_summary,
+        verified_incidents=verified_incidents or [],
+        limit=limit,
     )
 
-    return {
-        "model": result["model"],
-        "base_url": result["base_url"],
-        "selected_villages": selected_villages,
-        "advice": result["content"],
-    }
+    system_prompt, user_prompt = build_prompts(
+        command_plan
+    )
+
+    settings = get_ollama_settings()
+
+    try:
+        result = chat_with_ollama(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.1,
+            response_format=NARRATIVE_SCHEMA,
+        )
+
+        narrative = parse_narrative(
+            result["content"]
+        )
+
+        return {
+            "advisor_status": "available",
+            "model": result["model"],
+            "base_url": result["base_url"],
+            "command_plan": command_plan,
+            "narrative": narrative,
+            "fallback_message": None,
+        }
+
+    except (OllamaError, ValueError, json.JSONDecodeError) as error:
+        return {
+            "advisor_status": "fallback",
+            "model": settings["model"],
+            "base_url": settings["base_url"],
+            "command_plan": command_plan,
+            "narrative": None,
+            "fallback_message": (
+                "AI 敘述暫時不可用，請直接依據 "
+                "command_plan 的 priority_queue 執行人工確認。"
+            ),
+            "error": str(error),
+        }

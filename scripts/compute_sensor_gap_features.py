@@ -21,20 +21,16 @@ def assign_sensor_gap_level(row):
 def build_sensor_gap_reason(row):
     reasons = []
 
-    if row["sensor_count"] == 0 and row["static_risk_score"] >= 0.35:
-        reasons.append("靜態風險偏高但村里內無感測器覆蓋")
-
-    if row["sensor_count"] > 0:
-        reasons.append("村里內已有感測器覆蓋")
-
-    if row["flood_sensor_count"] > 0 and row["max_flood_depth_cm"] == 0:
-        reasons.append("淹水感測器目前未偵測到積淹水")
-
-    if row["rainfall_sensor_count"] == 0:
-        reasons.append("目前未取得村里內雨量感測器資料")
-
-    if len(reasons) == 0:
-        reasons.append("感測器覆蓋缺口較低")
+    if row["has_any_sensor"] == 0:
+        reasons.append("村里內無任何感測器覆蓋")
+    elif row["has_flood_sensor"] == 0 and row["has_rainfall_sensor"] == 0:
+        reasons.append("村里內缺少淹水與雨量感測器")
+    elif row["has_flood_sensor"] == 0:
+        reasons.append("村里內缺少淹水感測器")
+    elif row["has_rainfall_sensor"] == 0:
+        reasons.append("村里內缺少雨量感測器")
+    else:
+        reasons.append("村里內具基本感測器覆蓋")
 
     return reasons
 
@@ -77,18 +73,25 @@ print("必要欄位都有，可以繼續。")
 print("\n=== 3. 建立感測器覆蓋缺口欄位 ===")
 
 gdf["has_any_sensor"] = (gdf["sensor_count"].fillna(0) > 0).astype(int)
-gdf["has_flood_sensor"] = (gdf["flood_sensor_count"].fillna(0) > 0).astype(int)
-gdf["has_rainfall_sensor"] = (gdf["rainfall_sensor_count"].fillna(0) > 0).astype(int)
+gdf["has_flood_sensor"] = (
+    gdf["flood_sensor_count"].fillna(0) > 0
+).astype(int)
+gdf["has_rainfall_sensor"] = (
+    gdf["rainfall_sensor_count"].fillna(0) > 0
+).astype(int)
 
-# 感測器缺口：靜態風險越高，且沒有感測器，缺口越高
+# 感測器缺口只描述「觀測是否不足」，
+# 不再直接使用 static_risk_score，避免重複放大靜態風險。
 gdf["sensor_gap_score"] = (
-    gdf["static_risk_score"].fillna(0) * (1 - gdf["has_any_sensor"])
+    0.50 * (1 - gdf["has_any_sensor"])
+    + 0.30 * (1 - gdf["has_flood_sensor"])
+    + 0.20 * (1 - gdf["has_rainfall_sensor"])
 ).clip(0, 1)
 
-# 另一個更嚴格版本：沒有淹水感測器也沒有雨量感測器
+# 水文相關觀測缺口，保留給後續分析使用。
 gdf["hydro_sensor_gap_score"] = (
-    gdf["static_risk_score"].fillna(0)
-    * (1 - ((gdf["has_flood_sensor"] | gdf["has_rainfall_sensor"]).astype(int)))
+    0.60 * (1 - gdf["has_flood_sensor"])
+    + 0.40 * (1 - gdf["has_rainfall_sensor"])
 ).clip(0, 1)
 
 gdf["sensor_gap_level"] = gdf.apply(assign_sensor_gap_level, axis=1)
