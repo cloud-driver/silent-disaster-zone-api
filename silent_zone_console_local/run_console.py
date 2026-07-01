@@ -77,7 +77,7 @@ def main() -> None:
     print("Silent Zone Operations Console local host")
     print(f"UI URL: {url}")
     print("請保持這個終端機開啟；按 Ctrl+C 停止。")
-    print("FastAPI backend should run separately at http://127.0.0.1:8000")
+    print("FastAPI backend should run separately at https://silent-api.hasaki.idv.tw/")
     print("=" * 64)
 
     if args.open_browser:

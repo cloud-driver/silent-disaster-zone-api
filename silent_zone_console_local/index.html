@@ -417,7 +417,7 @@
           <article class="card">
             <div class="card-head"><div><h2>【01-1】登入並取得 15 分鐘 Token</h2><p>本頁會以 localhost 穩定來源執行，Token 暫存於目前瀏覽器分頁；重新整理與切換 UI 類別頁面會保留，關閉分頁、登出或 Token 到期後才會清除。</p></div><span class="badge auth" id="tokenBadge">TOKEN 未設定</span></div>
             <div class="field-grid">
-              <div class="field full"><label for="baseUrlInput">FastAPI Base URL <span>必填</span></label><input id="baseUrlInput" type="url" value="http://127.0.0.1:8000" placeholder="http://127.0.0.1:8000" /><div class="hint">不加結尾斜線。請透過本機 Python Host 開啟此頁面；不要直接雙擊 index.html。</div></div>
+              <div class="field full"><label for="baseUrlInput">FastAPI Base URL <span>必填</span></label><input id="baseUrlInput" type="url" value="https://silent-api.hasaki.idv.tw" placeholder="https://silent-api.hasaki.idv.tw" /><div class="hint">不加結尾斜線。請透過本機 Python Host 開啟此頁面；不要直接雙擊 index.html。</div></div>
               <div class="field"><label for="usernameInput">登入帳號 <span>必填</span></label><input id="usernameInput" autocomplete="username" placeholder="api-admin" /></div>
               <div class="field"><label for="passwordInput">登入密碼 <span>必填</span></label><input id="passwordInput" type="password" autocomplete="current-password" placeholder="••••••••" /></div>
 <div class="field full"><label for="tokenInput">Bearer Token <small>（登入後自動填入／可直接貼上）</small></label><input id="tokenInput" type="password" autocomplete="off" placeholder="登入成功後自動填入；也可貼上既有 token 後按同步" /><div class="hint">只貼 access_token 本體，不需要自行加上 <code>Bearer</code> 前綴。</div></div>
@@ -521,7 +521,7 @@
     const SESSION_STORAGE_KEY = 'silent-zone-console-session-v1';
 
     const state = {
-      page:'system', mode:'demo', connected:false, baseUrl:'http://127.0.0.1:8000', token:'', tokenExpiry:'', adminKey:'',
+      page:'system', mode:'demo', connected:false, baseUrl:'https://silent-api.hasaki.idv.tw', token:'', tokenExpiry:'', adminKey:'',
       health:structuredClone(DEMO.health), risks:structuredClone(DEMO.risks), reports:structuredClone(DEMO.reports), pending:structuredClone(DEMO.pending), incidents:structuredClone(DEMO.incidents), advisor:structuredClone(DEMO.advisor), lineHealth:structuredClone(DEMO.lineHealth), selectedVillageId:DEMO.risks[0].village_id,
       trace:[{title:'示範資料已載入', detail:'資料不代表即時災情，僅供介面與流程檢視。', time:'--:--:--'}], lastPayload:DEMO.health
     };

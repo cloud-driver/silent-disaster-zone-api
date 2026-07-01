@@ -14,7 +14,7 @@ Silent Zone Operations Console：本機啟動方式
    造成登入後在 UI 類別間切換時看起來像重新登入。
 
 5. 在【01】登入與連線中輸入：
-   Base URL: http://127.0.0.1:8000
+   Base URL: https://silent-api.hasaki.idv.tw/
    帳號：AUTH_LOGIN_USERNAME
    密碼：你的登入密碼
 
